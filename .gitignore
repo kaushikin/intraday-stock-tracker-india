@@ -26,13 +26,16 @@ yarn-debug.log*
 yarn-error.log*
 
 # local env files
-.env*.local
 .env
+.env.local
+.env*.local
+node_modules
+.next
 
 # vercel
 .vercel
 
 # typescript
 *.tsbuildinfo
-next-env.d.tsscripmaster.json
+next-env.d.ts
 scripmaster.json
