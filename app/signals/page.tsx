@@ -19,6 +19,13 @@ type AISentiment = {
   signalScore: number;
 };
 
+type NewsItem = {
+  title: string;
+  link: string;
+  source?: string;
+  publishedAt?: string;
+};
+
 function formatPrice(value: number) {
   if (!value) return '--';
   return `₹${value.toFixed(2)}`;
@@ -66,7 +73,31 @@ function buildSentimentText(signal: TradeSignal) {
   return `${signal.symbol} has no clear intraday trading setup currently. ${reasons}. Market signal is neutral and uncertain.`;
 }
 
-function calculateSignalScore(signal: TradeSignal, label: string, confidence: number) {
+function buildNewsSentimentText(signal: TradeSignal, news: NewsItem[]) {
+  if (!news.length) {
+    return buildSentimentText(signal);
+  }
+
+  const headlines = news.map((item) => item.title).join('. ');
+
+  return `
+Stock: ${signal.symbol}
+Technical Signal: ${signal.side}
+Signal Strength: ${signal.strength}
+Signal Reasons: ${signal.reasons.join('. ')}
+
+Latest News Headlines:
+${headlines}
+
+Analyze the financial sentiment of these headlines for intraday stock tracking.
+`;
+}
+
+function calculateSignalScore(
+  signal: TradeSignal,
+  label: string,
+  confidence: number
+) {
   let baseScore = 40;
 
   if (signal.side === 'BUY' || signal.side === 'SELL') {
@@ -108,7 +139,7 @@ function SentimentBox({
       <div className="mt-4 rounded-2xl border border-purple-500/20 bg-purple-500/10 p-4">
         <div className="flex items-center gap-2 text-purple-300">
           <Brain className="h-4 w-4 animate-pulse" />
-          <span className="text-sm font-semibold">AI is analyzing...</span>
+          <span className="text-sm font-semibold">AI is analyzing news...</span>
         </div>
       </div>
     );
@@ -167,14 +198,49 @@ function SentimentBox({
   );
 }
 
+function NewsBox({ news }: { news: NewsItem[] }) {
+  if (!news.length) {
+    return (
+      <div className="mt-4 rounded-2xl border border-slate-700 bg-black/30 p-4">
+        <p className="text-sm text-slate-400">
+          No latest news headlines found for this stock.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4 rounded-2xl border border-slate-700 bg-black/30 p-4">
+      <p className="mb-3 text-sm font-semibold text-slate-300">
+        Latest News Headlines
+      </p>
+
+      <ul className="space-y-2">
+        {news.slice(0, 3).map((item, index) => (
+          <li key={index} className="text-sm text-slate-400">
+            • {item.title}
+            {item.source && (
+              <span className="ml-1 text-xs text-slate-600">
+                — {item.source}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function SignalCard({
   signal,
   sentiment,
   loadingSentiment,
+  news,
 }: {
   signal: TradeSignal;
   sentiment?: AISentiment;
   loadingSentiment: boolean;
+  news: NewsItem[];
 }) {
   const isBuy = signal.side === 'BUY';
   const isSell = signal.side === 'SELL';
@@ -193,7 +259,9 @@ function SignalCard({
     : 'bg-slate-700 text-slate-300';
 
   return (
-    <div className={`rounded-3xl border ${cardBorder} bg-[#15161b] p-5 shadow-lg`}>
+    <div
+      className={`rounded-3xl border ${cardBorder} bg-[#15161b] p-5 shadow-lg`}
+    >
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-2xl font-bold text-white">{signal.symbol}</h2>
@@ -202,7 +270,9 @@ function SignalCard({
           </p>
         </div>
 
-        <div className={`rounded-full px-4 py-2 text-sm font-semibold ${badgeClass}`}>
+        <div
+          className={`rounded-full px-4 py-2 text-sm font-semibold ${badgeClass}`}
+        >
           {signal.status.replaceAll('_', ' ')}
         </div>
       </div>
@@ -235,10 +305,14 @@ function SignalCard({
 
       <SentimentBox sentiment={sentiment} loading={loadingSentiment} />
 
+      <NewsBox news={news} />
+
       {!isNeutral && (
         <div className="mt-5 grid grid-cols-2 gap-3">
           <div className="rounded-2xl bg-black/30 p-4">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Entry</p>
+            <p className="text-xs uppercase tracking-wide text-slate-500">
+              Entry
+            </p>
             <p className="mt-1 text-lg font-bold text-white">
               {formatPrice(signal.entry)}
             </p>
@@ -287,12 +361,14 @@ function SignalCard({
                 {formatPrice(signal.riskPerShare)}
               </p>
             </div>
+
             <div>
               <p className="text-slate-500">Reward/share</p>
               <p className="font-semibold text-white">
                 {formatPrice(signal.rewardPerShare)}
               </p>
             </div>
+
             <div>
               <p className="text-slate-500">R:R</p>
               <p className="font-semibold text-white">1:{signal.riskReward}</p>
@@ -320,6 +396,9 @@ export default function SignalsPage() {
 
   const [sentiments, setSentiments] = useState<Record<string, AISentiment>>({});
   const [loadingSentiment, setLoadingSentiment] = useState(false);
+  const [newsBySymbol, setNewsBySymbol] = useState<Record<string, NewsItem[]>>(
+    {}
+  );
 
   const signals = useMemo(() => {
     return generateSignals(watchlist, prices);
@@ -328,22 +407,44 @@ export default function SignalsPage() {
   const activeSignals = signals.filter((s) => s.side !== 'NEUTRAL');
   const neutralSignals = signals.filter((s) => s.side === 'NEUTRAL');
 
+  async function fetchNewsForSymbol(symbol: string): Promise<NewsItem[]> {
+    try {
+      const response = await fetch(`/api/news?symbol=${symbol}`, {
+        cache: 'no-store',
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        return [];
+      }
+
+      return data.news || [];
+    } catch {
+      return [];
+    }
+  }
+
   async function analyzeSentiments() {
     if (!signals.length) return;
 
     setLoadingSentiment(true);
 
     const nextSentiments: Record<string, AISentiment> = {};
+    const nextNewsBySymbol: Record<string, NewsItem[]> = {};
 
     for (const signal of signals) {
       try {
+        const stockNews = await fetchNewsForSymbol(signal.symbol);
+        nextNewsBySymbol[signal.symbol] = stockNews;
+
         const response = await fetch('/api/hf/sentiment', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            text: buildSentimentText(signal),
+            text: buildNewsSentimentText(signal, stockNews),
           }),
         });
 
@@ -356,13 +457,10 @@ export default function SignalsPage() {
 
         const result = data.result?.[0] || [];
 
-        const top = result.reduce(
-          (best: any, item: any) => {
-            if (!best || item.score > best.score) return item;
-            return best;
-          },
-          null
-        );
+        const top = result.reduce((best: any, item: any) => {
+          if (!best || item.score > best.score) return item;
+          return best;
+        }, null);
 
         const label = (top?.label || 'neutral').toLowerCase() as
           | 'positive'
@@ -377,11 +475,13 @@ export default function SignalsPage() {
           signalScore: calculateSignalScore(signal, label, confidence),
         };
       } catch {
+        nextNewsBySymbol[signal.symbol] = [];
         nextSentiments[signal.symbol] = getFallbackSentiment(signal);
       }
     }
 
     setSentiments(nextSentiments);
+    setNewsBySymbol(nextNewsBySymbol);
     setLoadingSentiment(false);
   }
 
@@ -399,7 +499,7 @@ export default function SignalsPage() {
           <div>
             <h1 className="text-4xl font-bold">Signals</h1>
             <p className="mt-2 text-slate-400">
-              Rule-based intraday watch signals with Hugging Face AI sentiment.
+              Rule-based intraday watch signals with real news sentiment.
             </p>
           </div>
 
@@ -423,8 +523,9 @@ export default function SignalsPage() {
         </div>
 
         <div className="mt-5 rounded-2xl border border-yellow-500/20 bg-yellow-500/10 p-4 text-sm text-yellow-200">
-          Educational signal tracker only. Not financial advice. Hugging Face
-          currently analyzes signal text; actual live news integration can be added next.
+          Educational signal tracker only. Not financial advice. Signals are
+          generated using simple rules, Angel One market data, Google News RSS,
+          and Hugging Face sentiment analysis.
         </div>
 
         <section className="mt-8">
@@ -444,6 +545,7 @@ export default function SignalsPage() {
                   signal={signal}
                   sentiment={sentiments[signal.symbol]}
                   loadingSentiment={loadingSentiment}
+                  news={newsBySymbol[signal.symbol] || []}
                 />
               ))}
             </div>
@@ -462,6 +564,7 @@ export default function SignalsPage() {
                 signal={signal}
                 sentiment={sentiments[signal.symbol]}
                 loadingSentiment={loadingSentiment}
+                news={newsBySymbol[signal.symbol] || []}
               />
             ))}
           </div>
