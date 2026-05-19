@@ -63,4 +63,32 @@ export const INSTRUMENTS: Record<string, Instrument> = {
     token: "1660",
     name: "ITC",
   },
+  BHARTIARTL: {
+    symbol: "BHARTIARTL",
+    tradingSymbol: "BHARTIARTL-EQ",
+    exchange: "NSE",
+    token: "10604",
+    name: "Bharti Airtel",
+  },
+  LT: {
+    symbol: "LT",
+    tradingSymbol: "LT-EQ",
+    exchange: "NSE",
+    token: "11483",
+    name: "Larsen & Toubro",
+  },
+  TATAMOTORS: {
+    symbol: "TATAMOTORS",
+    tradingSymbol: "TATAMOTORS-EQ",
+    exchange: "NSE",
+    token: "3456",
+    name: "Tata Motors",
+  },
+  ADANIENT: {
+    symbol: "ADANIENT",
+    tradingSymbol: "ADANIENT-EQ",
+    exchange: "NSE",
+    token: "25",
+    name: "Adani Enterprises",
+  },
 };
