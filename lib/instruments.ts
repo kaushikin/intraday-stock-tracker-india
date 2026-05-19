@@ -4,6 +4,7 @@ export type Instrument = {
   exchange: "NSE" | "BSE" | "MCX";
   token: string;
   name: string;
+  category?: "NIFTY50" | "NATURAL_RESOURCES";
 };
 
 export const INSTRUMENTS: Record<string, Instrument> = {
