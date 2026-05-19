@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 
 type QuoteRequestItem = {
   symbol: string;
-  exchange: "NSE" | "BSE";
+  exchange: "NSE" | "BSE" | "MCX";
   token: string;
 };
 

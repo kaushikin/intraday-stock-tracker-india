@@ -1,7 +1,7 @@
 export type Instrument = {
   symbol: string;
   tradingSymbol: string;
-  exchange: "NSE" | "BSE";
+  exchange: "NSE" | "BSE" | "MCX";
   token: string;
   name: string;
 };
@@ -357,6 +357,47 @@ export const INSTRUMENTS: Record<string, Instrument> = {
     token: "3787",
     name: "Wipro",
   },
+    CRUDEOIL: {
+    symbol: "CRUDEOIL",
+    tradingSymbol: "CRUDEOIL18JUN26FUT",
+    exchange: "MCX",
+    token: "499095",
+    name: "Crude Oil",
+    category: "NATURAL_RESOURCES",
+  },
+  GOLD: {
+    symbol: "GOLD",
+    tradingSymbol: "GOLD05JUN26FUT",
+    exchange: "MCX",
+    token: "459277",
+    name: "Gold",
+    category: "NATURAL_RESOURCES",
+  },
+  SILVER: {
+    symbol: "SILVER",
+    tradingSymbol: "SILVER03JUL26FUT",
+    exchange: "MCX",
+    token: "464150",
+    name: "Silver",
+    category: "NATURAL_RESOURCES",
+  },
+  COPPER: {
+    symbol: "COPPER",
+    tradingSymbol: "COPPER29MAY26FUT",
+    exchange: "MCX",
+    token: "510480",
+    name: "Copper",
+    category: "NATURAL_RESOURCES",
+  },
 };
 
-export const NIFTY50_SYMBOLS = Object.keys(INSTRUMENTS);
+export const NIFTY50_SYMBOLS = Object.keys(INSTRUMENTS).filter(
+  (symbol) => INSTRUMENTS[symbol].category !== "NATURAL_RESOURCES"
+);
+
+export const NATURAL_RESOURCES_SYMBOLS = [
+  "CRUDEOIL",
+  "GOLD",
+  "SILVER",
+  "COPPER",
+];
