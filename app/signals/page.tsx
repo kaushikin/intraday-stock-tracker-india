@@ -9,6 +9,9 @@ import {
   Target,
   TrendingDown,
   TrendingUp,
+  Radar,
+  Trash2,
+  CheckCircle2,
 } from 'lucide-react';
 import { useApp } from '@/contexts/AppContext';
 import { generateSignals, TradeSignal } from '@/lib/signalEngine';
@@ -26,6 +29,25 @@ type NewsItem = {
   publishedAt?: string;
 };
 
+type SignalLifecycleStatus =
+  | 'WAITING'
+  | 'TRIGGERED'
+  | 'TARGET_1_HIT'
+  | 'TARGET_2_HIT'
+  | 'STOP_LOSS_HIT'
+  | 'EXPIRED';
+
+type TrackedSignal = TradeSignal & {
+  id: string;
+  createdAt: string;
+  lifecycleStatus: SignalLifecycleStatus;
+  lastCheckedAt?: string;
+  sentiment?: AISentiment;
+  news?: NewsItem[];
+};
+
+const TRACKED_SIGNALS_KEY = 'tracked_signals_v1';
+
 function formatPrice(value: number) {
   if (!value) return '--';
   return `₹${value.toFixed(2)}`;
@@ -33,6 +55,111 @@ function formatPrice(value: number) {
 
 function formatPercent(value: number) {
   return `${Math.round(value)}%`;
+}
+
+function createId() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+
+  return Date.now().toString(36) + Math.random().toString(36).slice(2);
+}
+
+function isTerminalStatus(status: SignalLifecycleStatus) {
+  return (
+    status === 'TARGET_1_HIT' ||
+    status === 'TARGET_2_HIT' ||
+    status === 'STOP_LOSS_HIT' ||
+    status === 'EXPIRED'
+  );
+}
+
+function getStatusLabel(status: SignalLifecycleStatus) {
+  const labels: Record<SignalLifecycleStatus, string> = {
+    WAITING: 'Waiting',
+    TRIGGERED: 'Triggered',
+    TARGET_1_HIT: 'Target 1 Hit',
+    TARGET_2_HIT: 'Target 2 Hit',
+    STOP_LOSS_HIT: 'Stop Loss Hit',
+    EXPIRED: 'Expired',
+  };
+
+  return labels[status];
+}
+
+function getStatusClass(status: SignalLifecycleStatus) {
+  if (status === 'TARGET_1_HIT' || status === 'TARGET_2_HIT') {
+    return 'bg-green-500/15 text-green-400 border-green-500/30';
+  }
+
+  if (status === 'STOP_LOSS_HIT') {
+    return 'bg-red-500/15 text-red-400 border-red-500/30';
+  }
+
+  if (status === 'TRIGGERED') {
+    return 'bg-blue-500/15 text-blue-400 border-blue-500/30';
+  }
+
+  if (status === 'WAITING') {
+    return 'bg-yellow-500/15 text-yellow-300 border-yellow-500/30';
+  }
+
+  return 'bg-slate-700 text-slate-300 border-slate-600';
+}
+
+function calculateLifecycleStatus(
+  signal: TrackedSignal,
+  currentPrice: number
+): SignalLifecycleStatus {
+  if (!currentPrice) {
+    return signal.lifecycleStatus;
+  }
+
+  if (isTerminalStatus(signal.lifecycleStatus)) {
+    return signal.lifecycleStatus;
+  }
+
+  if (signal.side === 'BUY') {
+    if (currentPrice >= signal.target2) {
+      return 'TARGET_2_HIT';
+    }
+
+    if (currentPrice >= signal.target1) {
+      return 'TARGET_1_HIT';
+    }
+
+    if (currentPrice <= signal.stopLoss) {
+      return 'STOP_LOSS_HIT';
+    }
+
+    if (currentPrice >= signal.entry) {
+      return 'TRIGGERED';
+    }
+
+    return 'WAITING';
+  }
+
+  if (signal.side === 'SELL') {
+    if (currentPrice <= signal.target2) {
+      return 'TARGET_2_HIT';
+    }
+
+    if (currentPrice <= signal.target1) {
+      return 'TARGET_1_HIT';
+    }
+
+    if (currentPrice >= signal.stopLoss) {
+      return 'STOP_LOSS_HIT';
+    }
+
+    if (currentPrice <= signal.entry) {
+      return 'TRIGGERED';
+    }
+
+    return 'WAITING';
+  }
+
+  return 'WAITING';
 }
 
 function getFallbackSentiment(signal: TradeSignal): AISentiment {
@@ -231,16 +358,71 @@ function NewsBox({ news }: { news: NewsItem[] }) {
   );
 }
 
+function TrackingBox({
+  status,
+  currentPrice,
+  lastCheckedAt,
+}: {
+  status: SignalLifecycleStatus;
+  currentPrice: number;
+  lastCheckedAt?: string;
+}) {
+  return (
+    <div className="mt-4 rounded-2xl border border-slate-700 bg-black/30 p-4">
+      <div className="mb-3 flex items-center gap-2 text-slate-300">
+        <Radar className="h-4 w-4" />
+        <span className="text-sm font-semibold">Tracking Status</span>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 text-sm">
+        <div>
+          <p className="text-slate-500">Current Status</p>
+          <p
+            className={`mt-1 inline-flex rounded-full border px-3 py-1 text-xs font-bold ${getStatusClass(
+              status
+            )}`}
+          >
+            {getStatusLabel(status)}
+          </p>
+        </div>
+
+        <div>
+          <p className="text-slate-500">Current Price</p>
+          <p className="font-bold text-white">{formatPrice(currentPrice)}</p>
+        </div>
+      </div>
+
+      {lastCheckedAt && (
+        <p className="mt-3 text-xs text-slate-500">
+          Last checked: {new Date(lastCheckedAt).toLocaleTimeString()}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function SignalCard({
   signal,
   sentiment,
   loadingSentiment,
   news,
+  onTrack,
+  isTracked,
+  lifecycleStatus,
+  currentPrice,
+  lastCheckedAt,
+  onRemoveTracked,
 }: {
   signal: TradeSignal;
   sentiment?: AISentiment;
   loadingSentiment: boolean;
   news: NewsItem[];
+  onTrack?: () => void;
+  isTracked?: boolean;
+  lifecycleStatus?: SignalLifecycleStatus;
+  currentPrice?: number;
+  lastCheckedAt?: string;
+  onRemoveTracked?: () => void;
 }) {
   const isBuy = signal.side === 'BUY';
   const isSell = signal.side === 'SELL';
@@ -302,6 +484,14 @@ function SignalCard({
           <p className="text-lg font-semibold text-white">{signal.strength}</p>
         </div>
       </div>
+
+      {lifecycleStatus && (
+        <TrackingBox
+          status={lifecycleStatus}
+          currentPrice={currentPrice || 0}
+          lastCheckedAt={lastCheckedAt}
+        />
+      )}
 
       <SentimentBox sentiment={sentiment} loading={loadingSentiment} />
 
@@ -387,6 +577,31 @@ function SignalCard({
           ))}
         </ul>
       </div>
+
+      {!isNeutral && onTrack && (
+        <button
+          onClick={onTrack}
+          disabled={isTracked}
+          className={`mt-5 flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 font-semibold ${
+            isTracked
+              ? 'cursor-not-allowed bg-slate-700 text-slate-400'
+              : 'bg-blue-600 text-white'
+          }`}
+        >
+          <Radar className="h-4 w-4" />
+          {isTracked ? 'Already Tracking' : 'Track Signal'}
+        </button>
+      )}
+
+      {onRemoveTracked && (
+        <button
+          onClick={onRemoveTracked}
+          className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-red-600/20 px-4 py-3 font-semibold text-red-400"
+        >
+          <Trash2 className="h-4 w-4" />
+          Remove Tracking
+        </button>
+      )}
     </div>
   );
 }
@@ -399,6 +614,8 @@ export default function SignalsPage() {
   const [newsBySymbol, setNewsBySymbol] = useState<Record<string, NewsItem[]>>(
     {}
   );
+  const [trackedSignals, setTrackedSignals] = useState<TrackedSignal[]>([]);
+  const [hydratedTracking, setHydratedTracking] = useState(false);
 
   const signals = useMemo(() => {
     return generateSignals(watchlist, prices);
@@ -406,6 +623,58 @@ export default function SignalsPage() {
 
   const activeSignals = signals.filter((s) => s.side !== 'NEUTRAL');
   const neutralSignals = signals.filter((s) => s.side === 'NEUTRAL');
+
+  const activeTrackedSignals = trackedSignals.filter(
+    (signal) => !isTerminalStatus(signal.lifecycleStatus)
+  );
+
+  const completedTrackedSignals = trackedSignals.filter((signal) =>
+    isTerminalStatus(signal.lifecycleStatus)
+  );
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(TRACKED_SIGNALS_KEY);
+
+      if (saved) {
+        setTrackedSignals(JSON.parse(saved));
+      }
+    } catch {
+      setTrackedSignals([]);
+    }
+
+    setHydratedTracking(true);
+  }, []);
+
+  useEffect(() => {
+    if (!hydratedTracking) return;
+
+    localStorage.setItem(TRACKED_SIGNALS_KEY, JSON.stringify(trackedSignals));
+  }, [trackedSignals, hydratedTracking]);
+
+  useEffect(() => {
+    if (!hydratedTracking || trackedSignals.length === 0) return;
+
+    setTrackedSignals((prev) =>
+      prev.map((signal) => {
+        const currentPrice = prices[signal.symbol]?.price || 0;
+        const nextStatus = calculateLifecycleStatus(signal, currentPrice);
+
+        if (nextStatus === signal.lifecycleStatus) {
+          return {
+            ...signal,
+            lastCheckedAt: new Date().toISOString(),
+          };
+        }
+
+        return {
+          ...signal,
+          lifecycleStatus: nextStatus,
+          lastCheckedAt: new Date().toISOString(),
+        };
+      })
+    );
+  }, [prices, hydratedTracking]);
 
   async function fetchNewsForSymbol(symbol: string): Promise<NewsItem[]> {
     try {
@@ -485,6 +754,59 @@ export default function SignalsPage() {
     setLoadingSentiment(false);
   }
 
+  function isSignalAlreadyTracked(signal: TradeSignal) {
+    return trackedSignals.some(
+      (tracked) =>
+        tracked.symbol === signal.symbol &&
+        tracked.side === signal.side &&
+        !isTerminalStatus(tracked.lifecycleStatus)
+    );
+  }
+
+  function trackSignal(signal: TradeSignal) {
+    if (signal.side === 'NEUTRAL') {
+      alert('Neutral signals cannot be tracked.');
+      return;
+    }
+
+    if (isSignalAlreadyTracked(signal)) {
+      alert(`${signal.symbol} ${signal.side} signal is already being tracked.`);
+      return;
+    }
+
+    const currentPrice = prices[signal.symbol]?.price || signal.entry;
+
+    const trackedSignal: TrackedSignal = {
+      ...signal,
+      id: createId(),
+      createdAt: new Date().toISOString(),
+      lastCheckedAt: new Date().toISOString(),
+      lifecycleStatus: calculateLifecycleStatus(
+        {
+          ...signal,
+          id: 'temp',
+          createdAt: new Date().toISOString(),
+          lifecycleStatus: 'WAITING',
+        },
+        currentPrice
+      ),
+      sentiment: sentiments[signal.symbol],
+      news: newsBySymbol[signal.symbol] || [],
+    };
+
+    setTrackedSignals((prev) => [trackedSignal, ...prev]);
+  }
+
+  function removeTrackedSignal(id: string) {
+    setTrackedSignals((prev) => prev.filter((signal) => signal.id !== id));
+  }
+
+  function clearCompletedSignals() {
+    setTrackedSignals((prev) =>
+      prev.filter((signal) => !isTerminalStatus(signal.lifecycleStatus))
+    );
+  }
+
   useEffect(() => {
     if (!signals.length) return;
 
@@ -499,7 +821,7 @@ export default function SignalsPage() {
           <div>
             <h1 className="text-4xl font-bold">Signals</h1>
             <p className="mt-2 text-slate-400">
-              Rule-based intraday watch signals with real news sentiment.
+              Rule-based intraday watch signals with tracking and news sentiment.
             </p>
           </div>
 
@@ -529,6 +851,60 @@ export default function SignalsPage() {
         </div>
 
         <section className="mt-8">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <h2 className="text-sm uppercase tracking-[0.25em] text-slate-500">
+              Tracked Signals ({trackedSignals.length})
+            </h2>
+
+            {completedTrackedSignals.length > 0 && (
+              <button
+                onClick={clearCompletedSignals}
+                className="flex items-center gap-2 rounded-xl bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-300"
+              >
+                <CheckCircle2 className="h-4 w-4" />
+                Clear Completed
+              </button>
+            )}
+          </div>
+
+          {trackedSignals.length === 0 ? (
+            <div className="rounded-3xl border border-slate-800 bg-[#15161b] p-6 text-slate-400">
+              No tracked signals yet. Tap “Track Signal” on any active signal.
+            </div>
+          ) : (
+            <div className="space-y-5">
+              {activeTrackedSignals.map((signal) => (
+                <SignalCard
+                  key={signal.id}
+                  signal={signal}
+                  sentiment={signal.sentiment}
+                  loadingSentiment={false}
+                  news={signal.news || []}
+                  lifecycleStatus={signal.lifecycleStatus}
+                  currentPrice={prices[signal.symbol]?.price || 0}
+                  lastCheckedAt={signal.lastCheckedAt}
+                  onRemoveTracked={() => removeTrackedSignal(signal.id)}
+                />
+              ))}
+
+              {completedTrackedSignals.map((signal) => (
+                <SignalCard
+                  key={signal.id}
+                  signal={signal}
+                  sentiment={signal.sentiment}
+                  loadingSentiment={false}
+                  news={signal.news || []}
+                  lifecycleStatus={signal.lifecycleStatus}
+                  currentPrice={prices[signal.symbol]?.price || 0}
+                  lastCheckedAt={signal.lastCheckedAt}
+                  onRemoveTracked={() => removeTrackedSignal(signal.id)}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="mt-8">
           <h2 className="mb-4 text-sm uppercase tracking-[0.25em] text-slate-500">
             Active Watch Signals ({activeSignals.length})
           </h2>
@@ -546,6 +922,8 @@ export default function SignalsPage() {
                   sentiment={sentiments[signal.symbol]}
                   loadingSentiment={loadingSentiment}
                   news={newsBySymbol[signal.symbol] || []}
+                  onTrack={() => trackSignal(signal)}
+                  isTracked={isSignalAlreadyTracked(signal)}
                 />
               ))}
             </div>
