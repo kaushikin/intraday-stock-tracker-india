@@ -11,9 +11,14 @@ import React, {
 import { format } from 'date-fns';
 import { INSTRUMENTS } from '@/lib/instruments';
 
-interface PriceData {
+export interface PriceData {
   price: number;
   change: number; // percentage change
+  open?: number;
+  high?: number;
+  low?: number;
+  close?: number;
+  lastUpdated?: string;
 }
 
 interface Trade {
@@ -46,19 +51,6 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
-const POPULAR_STOCKS = [
-  'RELIANCE',
-  'TCS',
-  'INFY',
-  'HDFCBANK',
-  'ICICIBANK',
-  'SBIN',
-  'BHARTIARTL',
-  'LT',
-  'TATAMOTORS',
-  'ADANIENT',
-];
-
 const INITIAL_PRICES: Record<string, PriceData> = {
   RELIANCE: { price: 0, change: 0 },
   TCS: { price: 0, change: 0 },
@@ -87,7 +79,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const today = format(new Date(), 'yyyy-MM-dd');
 
-  // Load from localStorage
   useEffect(() => {
     const savedWatchlist = localStorage.getItem('watchlist');
     if (savedWatchlist) {
@@ -102,23 +93,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setHydrated(true);
   }, []);
 
-  // Save watchlist to localStorage
   useEffect(() => {
     if (!hydrated) return;
     localStorage.setItem('watchlist', JSON.stringify(watchlist));
   }, [watchlist, hydrated]);
 
-  // Save trades to localStorage
   useEffect(() => {
     if (!hydrated) return;
     localStorage.setItem('trades', JSON.stringify(trades));
   }, [trades, hydrated]);
 
-  // Calculate daily P/L
   const calculateDailyPL = (currentTrades: Trade[]) => {
     const todayTrades = currentTrades.filter((t) => t.date === today);
 
-    const pl = todayTrades.reduce((sum, trade) => {
+    return todayTrades.reduce((sum, trade) => {
       const plValue =
         trade.side === 'BUY'
           ? (trade.exitPrice - trade.entryPrice) * trade.quantity -
@@ -128,11 +116,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       return sum + plValue;
     }, 0);
-
-    return pl;
   };
 
-  // Update daily P/L and risk status
   useEffect(() => {
     const pl = calculateDailyPL(trades);
     setDailyPL(pl);
@@ -141,7 +126,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setIsLossLimitReached(pl <= -500);
   }, [trades, today]);
 
-  // Fetch live prices from Angel API route
   const updatePrices = useCallback(async () => {
     if (!watchlist.length) return;
 
@@ -186,6 +170,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
           updated[quote.symbol] = {
             price: Number(quote.price || 0),
             change: Number(quote.changePercent || 0),
+            open: Number(quote.open || 0),
+            high: Number(quote.high || 0),
+            low: Number(quote.low || 0),
+            close: Number(quote.close || 0),
+            lastUpdated: quote.lastUpdated,
           };
         });
 
@@ -196,7 +185,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [watchlist]);
 
-  // Auto-refresh live prices
   useEffect(() => {
     if (!hydrated) return;
 
@@ -204,7 +192,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     const interval = setInterval(() => {
       updatePrices();
-    }, 10000); // 10 seconds
+    }, 10000);
 
     return () => clearInterval(interval);
   }, [hydrated, updatePrices]);

@@ -2,36 +2,68 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, List, PlusCircle, Bot, Settings } from 'lucide-react';
+import {
+  BarChart3,
+  Brain,
+  Eye,
+  LineChart,
+  Settings,
+  NotebookText,
+} from 'lucide-react';
 
 const navItems = [
-  { href: '/dashboard', icon: Home, label: 'Dashboard' },
-  { href: '/watchlist', icon: List, label: 'Watchlist' },
-  { href: '/trades', icon: PlusCircle, label: 'Trades' },
-  { href: '/ai-summary', icon: Bot, label: 'AI Coach' },
-  { href: '/settings', icon: Settings, label: 'Settings' },
+  {
+    href: '/dashboard',
+    label: 'Home',
+    icon: BarChart3,
+  },
+  {
+    href: '/watchlist',
+    label: 'Watch',
+    icon: Eye,
+  },
+  {
+    href: '/signals',
+    label: 'Signals',
+    icon: LineChart,
+  },
+  {
+    href: '/trades',
+    label: 'Trades',
+    icon: NotebookText,
+  },
+  {
+    href: '/ai-summary',
+    label: 'AI',
+    icon: Brain,
+  },
+  {
+    href: '/settings',
+    label: 'Settings',
+    icon: Settings,
+  },
 ];
 
 export default function BottomNav() {
   const pathname = usePathname();
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-zinc-950 border-t border-zinc-800 z-50">
-      <div className="max-w-md mx-auto flex justify-around items-center h-16 px-2">
-        {navItems.map(({ href, icon: Icon, label }) => {
-          const isActive = pathname === href || (href === '/dashboard' && pathname === '/');
+    <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-slate-800 bg-[#090a0f]/95 backdrop-blur">
+      <div className="mx-auto grid max-w-3xl grid-cols-6">
+        {navItems.map((item) => {
+          const Icon = item.icon;
+          const active = pathname === item.href;
+
           return (
             <Link
-              key={href}
-              href={href}
-              className={`flex flex-col items-center justify-center flex-1 py-1 transition-colors ${
-                isActive 
-                  ? 'text-emerald-400' 
-                  : 'text-zinc-400 hover:text-zinc-200'
+              key={item.href}
+              href={item.href}
+              className={`flex flex-col items-center justify-center gap-1 px-2 py-3 text-xs ${
+                active ? 'text-emerald-400' : 'text-slate-500'
               }`}
             >
-              <Icon className="w-5 h-5 mb-0.5" />
-              <span className="text-[10px] font-medium">{label}</span>
+              <Icon className="h-5 w-5" />
+              <span>{item.label}</span>
             </Link>
           );
         })}
