@@ -1,19 +1,21 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   Activity,
   ArrowDownRight,
   ArrowUpRight,
   BarChart3,
   CalendarDays,
-  IndianRupee,
+  CheckCircle2,
+  Clock,
   PieChart,
-  ShieldAlert,
+  Radar,
   Target,
   TrendingDown,
   TrendingUp,
   Wallet,
+  XCircle,
 } from 'lucide-react';
 import { useApp } from '@/contexts/AppContext';
 
@@ -25,6 +27,39 @@ type StockPL = {
   wins: number;
   losses: number;
 };
+
+type SignalLifecycleStatus =
+  | 'WAITING'
+  | 'TRIGGERED'
+  | 'TARGET_1_HIT'
+  | 'TARGET_2_HIT'
+  | 'STOP_LOSS_HIT'
+  | 'EXPIRED';
+
+type TrackedSignal = {
+  id: string;
+  symbol: string;
+  side: 'BUY' | 'SELL' | 'NEUTRAL';
+  strength: 'STRONG' | 'MEDIUM' | 'WEAK';
+  entry: number;
+  stopLoss: number;
+  target1: number;
+  target2: number;
+  riskPerShare: number;
+  rewardPerShare: number;
+  riskReward: number;
+  lifecycleStatus: SignalLifecycleStatus;
+  createdAt: string;
+  lastCheckedAt?: string;
+  savedToJournal?: boolean;
+  sentiment?: {
+    label: 'positive' | 'negative' | 'neutral';
+    confidence: number;
+    signalScore: number;
+  };
+};
+
+const TRACKED_SIGNALS_KEY = 'tracked_signals_v1';
 
 function formatCurrency(value: number) {
   const sign = value < 0 ? '-' : '';
@@ -56,6 +91,36 @@ function isToday(dateString: string) {
   );
 }
 
+function isTargetHit(status: SignalLifecycleStatus) {
+  return status === 'TARGET_1_HIT' || status === 'TARGET_2_HIT';
+}
+
+function isStopLossHit(status: SignalLifecycleStatus) {
+  return status === 'STOP_LOSS_HIT';
+}
+
+function isCompletedSignal(status: SignalLifecycleStatus) {
+  return (
+    status === 'TARGET_1_HIT' ||
+    status === 'TARGET_2_HIT' ||
+    status === 'STOP_LOSS_HIT' ||
+    status === 'EXPIRED'
+  );
+}
+
+function getSignalStatusLabel(status: SignalLifecycleStatus) {
+  const labels: Record<SignalLifecycleStatus, string> = {
+    WAITING: 'Waiting',
+    TRIGGERED: 'Triggered',
+    TARGET_1_HIT: 'Target 1 Hit',
+    TARGET_2_HIT: 'Target 2 Hit',
+    STOP_LOSS_HIT: 'Stop Loss Hit',
+    EXPIRED: 'Expired',
+  };
+
+  return labels[status];
+}
+
 function MetricCard({
   title,
   value,
@@ -66,8 +131,8 @@ function MetricCard({
   title: string;
   value: string;
   subtitle?: string;
-  icon: React.ReactNode;
-  tone?: 'green' | 'red' | 'yellow' | 'neutral';
+  icon: ReactNode;
+  tone?: 'green' | 'red' | 'yellow' | 'blue' | 'neutral';
 }) {
   const toneClass =
     tone === 'green'
@@ -76,6 +141,8 @@ function MetricCard({
       ? 'text-red-400'
       : tone === 'yellow'
       ? 'text-yellow-400'
+      : tone === 'blue'
+      ? 'text-blue-400'
       : 'text-white';
 
   return (
@@ -119,10 +186,40 @@ function PLText({ value }: { value: number }) {
   );
 }
 
+function SignalStatusBadge({ status }: { status: SignalLifecycleStatus }) {
+  const className = isTargetHit(status)
+    ? 'bg-green-500/15 text-green-400'
+    : isStopLossHit(status)
+    ? 'bg-red-500/15 text-red-400'
+    : status === 'TRIGGERED'
+    ? 'bg-blue-500/15 text-blue-400'
+    : status === 'WAITING'
+    ? 'bg-yellow-500/15 text-yellow-300'
+    : 'bg-slate-700 text-slate-300';
+
+  return (
+    <span className={`rounded-full px-3 py-1 text-xs font-bold ${className}`}>
+      {getSignalStatusLabel(status)}
+    </span>
+  );
+}
+
 export default function AnalyticsPage() {
   const { trades, dailyPL } = useApp();
+  const [trackedSignals, setTrackedSignals] = useState<TrackedSignal[]>([]);
 
-  const analytics = useMemo(() => {
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(TRACKED_SIGNALS_KEY);
+      if (saved) {
+        setTrackedSignals(JSON.parse(saved));
+      }
+    } catch {
+      setTrackedSignals([]);
+    }
+  }, []);
+
+  const tradeAnalytics = useMemo(() => {
     const totalTrades = trades.length;
 
     const enrichedTrades = trades.map((trade) => ({
@@ -249,8 +346,205 @@ export default function AnalyticsPage() {
     };
   }, [trades, dailyPL]);
 
-  const netTone = analytics.netPL >= 0 ? 'green' : 'red';
-  const todayTone = analytics.dailyPL >= 0 ? 'green' : 'red';
+  const signalAnalytics = useMemo(() => {
+    const totalSignals = trackedSignals.length;
+
+    const activeSignals = trackedSignals.filter(
+      (signal) => !isCompletedSignal(signal.lifecycleStatus)
+    );
+
+    const completedSignals = trackedSignals.filter((signal) =>
+      isCompletedSignal(signal.lifecycleStatus)
+    );
+
+    const targetHitSignals = trackedSignals.filter((signal) =>
+      isTargetHit(signal.lifecycleStatus)
+    );
+
+    const stopLossSignals = trackedSignals.filter((signal) =>
+      isStopLossHit(signal.lifecycleStatus)
+    );
+
+    const expiredSignals = trackedSignals.filter(
+      (signal) => signal.lifecycleStatus === 'EXPIRED'
+    );
+
+    const triggeredSignals = trackedSignals.filter(
+      (signal) => signal.lifecycleStatus === 'TRIGGERED'
+    );
+
+    const buySignals = trackedSignals.filter((signal) => signal.side === 'BUY');
+    const sellSignals = trackedSignals.filter(
+      (signal) => signal.side === 'SELL'
+    );
+
+    const buyTargetHits = buySignals.filter((signal) =>
+      isTargetHit(signal.lifecycleStatus)
+    );
+
+    const buyStopLossHits = buySignals.filter((signal) =>
+      isStopLossHit(signal.lifecycleStatus)
+    );
+
+    const sellTargetHits = sellSignals.filter((signal) =>
+      isTargetHit(signal.lifecycleStatus)
+    );
+
+    const sellStopLossHits = sellSignals.filter((signal) =>
+      isStopLossHit(signal.lifecycleStatus)
+    );
+
+    const completedForAccuracy = trackedSignals.filter(
+      (signal) =>
+        isTargetHit(signal.lifecycleStatus) ||
+        isStopLossHit(signal.lifecycleStatus)
+    );
+
+    const targetHitRate =
+      completedForAccuracy.length > 0
+        ? (targetHitSignals.length / completedForAccuracy.length) * 100
+        : 0;
+
+    const stopLossRate =
+      completedForAccuracy.length > 0
+        ? (stopLossSignals.length / completedForAccuracy.length) * 100
+        : 0;
+
+    const buyCompletedForAccuracy = buySignals.filter(
+      (signal) =>
+        isTargetHit(signal.lifecycleStatus) ||
+        isStopLossHit(signal.lifecycleStatus)
+    );
+
+    const sellCompletedForAccuracy = sellSignals.filter(
+      (signal) =>
+        isTargetHit(signal.lifecycleStatus) ||
+        isStopLossHit(signal.lifecycleStatus)
+    );
+
+    const buyAccuracy =
+      buyCompletedForAccuracy.length > 0
+        ? (buyTargetHits.length / buyCompletedForAccuracy.length) * 100
+        : 0;
+
+    const sellAccuracy =
+      sellCompletedForAccuracy.length > 0
+        ? (sellTargetHits.length / sellCompletedForAccuracy.length) * 100
+        : 0;
+
+    const savedToJournal = trackedSignals.filter(
+      (signal) => signal.savedToJournal
+    );
+
+    const signalsWithScore = trackedSignals.filter(
+      (signal) => signal.sentiment?.signalScore !== undefined
+    );
+
+    const averageSignalScore =
+      signalsWithScore.length > 0
+        ? signalsWithScore.reduce(
+            (sum, signal) => sum + Number(signal.sentiment?.signalScore || 0),
+            0
+          ) / signalsWithScore.length
+        : 0;
+
+    const winningSignalsWithScore = targetHitSignals.filter(
+      (signal) => signal.sentiment?.signalScore !== undefined
+    );
+
+    const losingSignalsWithScore = stopLossSignals.filter(
+      (signal) => signal.sentiment?.signalScore !== undefined
+    );
+
+    const averageWinningSignalScore =
+      winningSignalsWithScore.length > 0
+        ? winningSignalsWithScore.reduce(
+            (sum, signal) => sum + Number(signal.sentiment?.signalScore || 0),
+            0
+          ) / winningSignalsWithScore.length
+        : 0;
+
+    const averageLosingSignalScore =
+      losingSignalsWithScore.length > 0
+        ? losingSignalsWithScore.reduce(
+            (sum, signal) => sum + Number(signal.sentiment?.signalScore || 0),
+            0
+          ) / losingSignalsWithScore.length
+        : 0;
+
+    const symbolMap: Record<
+      string,
+      {
+        symbol: string;
+        total: number;
+        targetHits: number;
+        stopLossHits: number;
+        active: number;
+      }
+    > = {};
+
+    trackedSignals.forEach((signal) => {
+      if (!symbolMap[signal.symbol]) {
+        symbolMap[signal.symbol] = {
+          symbol: signal.symbol,
+          total: 0,
+          targetHits: 0,
+          stopLossHits: 0,
+          active: 0,
+        };
+      }
+
+      symbolMap[signal.symbol].total += 1;
+
+      if (isTargetHit(signal.lifecycleStatus)) {
+        symbolMap[signal.symbol].targetHits += 1;
+      } else if (isStopLossHit(signal.lifecycleStatus)) {
+        symbolMap[signal.symbol].stopLossHits += 1;
+      } else if (!isCompletedSignal(signal.lifecycleStatus)) {
+        symbolMap[signal.symbol].active += 1;
+      }
+    });
+
+    const symbolAccuracy = Object.values(symbolMap).sort(
+      (a, b) => b.targetHits - a.targetHits
+    );
+
+    const recentSignals = [...trackedSignals]
+      .sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      )
+      .slice(0, 5);
+
+    return {
+      totalSignals,
+      activeSignals,
+      completedSignals,
+      targetHitSignals,
+      stopLossSignals,
+      expiredSignals,
+      triggeredSignals,
+      buySignals,
+      sellSignals,
+      buyTargetHits,
+      buyStopLossHits,
+      sellTargetHits,
+      sellStopLossHits,
+      targetHitRate,
+      stopLossRate,
+      buyAccuracy,
+      sellAccuracy,
+      savedToJournal,
+      averageSignalScore,
+      averageWinningSignalScore,
+      averageLosingSignalScore,
+      symbolAccuracy,
+      recentSignals,
+    };
+  }, [trackedSignals]);
+
+  const netTone = tradeAnalytics.netPL >= 0 ? 'green' : 'red';
+  const todayTone = tradeAnalytics.dailyPL >= 0 ? 'green' : 'red';
 
   return (
     <main className="min-h-screen bg-[#050608] px-5 pb-28 pt-8 text-white">
@@ -258,83 +552,83 @@ export default function AnalyticsPage() {
         <div>
           <h1 className="text-4xl font-bold">Analytics</h1>
           <p className="mt-2 text-slate-400">
-            Review your trading performance, discipline, and stock-wise results.
+            Review trade performance, signal accuracy, and discipline.
           </p>
         </div>
 
-        {analytics.totalTrades === 0 ? (
-          <div className="mt-8 rounded-3xl border border-slate-800 bg-[#15161b] p-6 text-slate-400">
-            No trades yet. Save a completed signal to journal or add a trade
-            manually to see analytics.
-          </div>
-        ) : (
-          <>
-            <section className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <MetricCard
-                title="Net P/L"
-                value={formatCurrency(analytics.netPL)}
-                subtitle={`${analytics.totalTrades} total trades`}
-                icon={<Wallet className="h-5 w-5" />}
-                tone={netTone}
-              />
+        <section className="mt-8">
+          <SectionTitle title="Trade Performance" />
 
-              <MetricCard
-                title="Today's P/L"
-                value={formatCurrency(analytics.dailyPL)}
-                subtitle={`${analytics.todayTrades.length} trades today`}
-                icon={<CalendarDays className="h-5 w-5" />}
-                tone={todayTone}
-              />
-
-              <MetricCard
-                title="Win Rate"
-                value={formatPercent(analytics.winRate)}
-                subtitle={`${analytics.winningTrades.length} wins • ${analytics.losingTrades.length} losses`}
-                icon={<Target className="h-5 w-5" />}
-                tone={
-                  analytics.winRate >= 55
-                    ? 'green'
-                    : analytics.winRate >= 40
-                    ? 'yellow'
-                    : 'red'
-                }
-              />
-
-              <MetricCard
-                title="Profit Factor"
-                value={
-                  analytics.profitFactor
-                    ? analytics.profitFactor.toFixed(2)
-                    : '0.00'
-                }
-                subtitle="Gross profit / gross loss"
-                icon={<Activity className="h-5 w-5" />}
-                tone={
-                  analytics.profitFactor >= 1.5
-                    ? 'green'
-                    : analytics.profitFactor >= 1
-                    ? 'yellow'
-                    : 'red'
-                }
-              />
-            </section>
-
-            <section className="mt-8">
-              <SectionTitle title="Performance Summary" />
-
+          {tradeAnalytics.totalTrades === 0 ? (
+            <div className="rounded-3xl border border-slate-800 bg-[#15161b] p-6 text-slate-400">
+              No trades yet. Save a completed signal to journal or add a trade
+              manually to see trade analytics.
+            </div>
+          ) : (
+            <>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <MetricCard
+                  title="Net P/L"
+                  value={formatCurrency(tradeAnalytics.netPL)}
+                  subtitle={`${tradeAnalytics.totalTrades} total trades`}
+                  icon={<Wallet className="h-5 w-5" />}
+                  tone={netTone}
+                />
+
+                <MetricCard
+                  title="Today's P/L"
+                  value={formatCurrency(tradeAnalytics.dailyPL)}
+                  subtitle={`${tradeAnalytics.todayTrades.length} trades today`}
+                  icon={<CalendarDays className="h-5 w-5" />}
+                  tone={todayTone}
+                />
+
+                <MetricCard
+                  title="Win Rate"
+                  value={formatPercent(tradeAnalytics.winRate)}
+                  subtitle={`${tradeAnalytics.winningTrades.length} wins • ${tradeAnalytics.losingTrades.length} losses`}
+                  icon={<Target className="h-5 w-5" />}
+                  tone={
+                    tradeAnalytics.winRate >= 55
+                      ? 'green'
+                      : tradeAnalytics.winRate >= 40
+                      ? 'yellow'
+                      : 'red'
+                  }
+                />
+
+                <MetricCard
+                  title="Profit Factor"
+                  value={
+                    tradeAnalytics.profitFactor
+                      ? tradeAnalytics.profitFactor.toFixed(2)
+                      : '0.00'
+                  }
+                  subtitle="Gross profit / gross loss"
+                  icon={<Activity className="h-5 w-5" />}
+                  tone={
+                    tradeAnalytics.profitFactor >= 1.5
+                      ? 'green'
+                      : tradeAnalytics.profitFactor >= 1
+                      ? 'yellow'
+                      : 'red'
+                  }
+                />
+              </div>
+
+              <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <MetricCard
                   title="Average Win"
-                  value={formatCurrency(analytics.averageWin)}
-                  subtitle={`${analytics.winningTrades.length} winning trades`}
+                  value={formatCurrency(tradeAnalytics.averageWin)}
+                  subtitle={`${tradeAnalytics.winningTrades.length} winning trades`}
                   icon={<ArrowUpRight className="h-5 w-5" />}
                   tone="green"
                 />
 
                 <MetricCard
                   title="Average Loss"
-                  value={formatCurrency(analytics.averageLoss)}
-                  subtitle={`${analytics.losingTrades.length} losing trades`}
+                  value={formatCurrency(tradeAnalytics.averageLoss)}
+                  subtitle={`${tradeAnalytics.losingTrades.length} losing trades`}
                   icon={<ArrowDownRight className="h-5 w-5" />}
                   tone="red"
                 />
@@ -342,13 +636,13 @@ export default function AnalyticsPage() {
                 <MetricCard
                   title="Best Trade"
                   value={
-                    analytics.bestTrade
-                      ? formatCurrency(analytics.bestTrade.pnl)
+                    tradeAnalytics.bestTrade
+                      ? formatCurrency(tradeAnalytics.bestTrade.pnl)
                       : '₹0.00'
                   }
                   subtitle={
-                    analytics.bestTrade
-                      ? `${analytics.bestTrade.symbol} • ${analytics.bestTrade.side}`
+                    tradeAnalytics.bestTrade
+                      ? `${tradeAnalytics.bestTrade.symbol} • ${tradeAnalytics.bestTrade.side}`
                       : 'No trade'
                   }
                   icon={<TrendingUp className="h-5 w-5" />}
@@ -358,181 +652,405 @@ export default function AnalyticsPage() {
                 <MetricCard
                   title="Worst Trade"
                   value={
-                    analytics.worstTrade
-                      ? formatCurrency(analytics.worstTrade.pnl)
+                    tradeAnalytics.worstTrade
+                      ? formatCurrency(tradeAnalytics.worstTrade.pnl)
                       : '₹0.00'
                   }
                   subtitle={
-                    analytics.worstTrade
-                      ? `${analytics.worstTrade.symbol} • ${analytics.worstTrade.side}`
+                    tradeAnalytics.worstTrade
+                      ? `${tradeAnalytics.worstTrade.symbol} • ${tradeAnalytics.worstTrade.side}`
                       : 'No trade'
                   }
                   icon={<TrendingDown className="h-5 w-5" />}
                   tone="red"
                 />
               </div>
-            </section>
 
-            <section className="mt-8">
-              <SectionTitle title="Trade Breakdown" />
-
-              <div className="rounded-3xl border border-slate-800 bg-[#15161b] p-5">
+              <div className="mt-4 rounded-3xl border border-slate-800 bg-[#15161b] p-5">
                 <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
                   <div>
                     <p className="text-sm text-slate-500">Total Trades</p>
                     <p className="mt-1 text-2xl font-bold text-white">
-                      {analytics.totalTrades}
+                      {tradeAnalytics.totalTrades}
                     </p>
                   </div>
 
                   <div>
                     <p className="text-sm text-slate-500">BUY Trades</p>
                     <p className="mt-1 text-2xl font-bold text-green-400">
-                      {analytics.buyTrades.length}
+                      {tradeAnalytics.buyTrades.length}
                     </p>
                     <p className="text-xs text-slate-500">
-                      P/L <PLText value={analytics.buyPL} />
+                      P/L <PLText value={tradeAnalytics.buyPL} />
                     </p>
                   </div>
 
                   <div>
                     <p className="text-sm text-slate-500">SELL Trades</p>
                     <p className="mt-1 text-2xl font-bold text-red-400">
-                      {analytics.sellTrades.length}
+                      {tradeAnalytics.sellTrades.length}
                     </p>
                     <p className="text-xs text-slate-500">
-                      P/L <PLText value={analytics.sellPL} />
+                      P/L <PLText value={tradeAnalytics.sellPL} />
                     </p>
                   </div>
 
                   <div>
                     <p className="text-sm text-slate-500">Brokerage</p>
                     <p className="mt-1 text-2xl font-bold text-white">
-                      {formatCurrency(analytics.totalBrokerage)}
+                      {formatCurrency(tradeAnalytics.totalBrokerage)}
                     </p>
                   </div>
                 </div>
               </div>
-            </section>
+            </>
+          )}
+        </section>
 
-            <section className="mt-8">
-              <SectionTitle
-                title="Stock-wise P/L"
-                subtitle={
-                  analytics.mostTradedStock
-                    ? `Most traded: ${analytics.mostTradedStock.symbol} (${analytics.mostTradedStock.trades} trades)`
-                    : undefined
-                }
-              />
+        <section className="mt-10">
+          <SectionTitle
+            title="Signal Accuracy"
+            subtitle="Based on tracked signals from the Signals page."
+          />
 
-              <div className="space-y-3">
-                {analytics.stockWise.map((stock) => {
-                  const winRate =
-                    stock.trades > 0 ? (stock.wins / stock.trades) * 100 : 0;
+          {signalAnalytics.totalSignals === 0 ? (
+            <div className="rounded-3xl border border-slate-800 bg-[#15161b] p-6 text-slate-400">
+              No tracked signals yet. Go to Signals, tap “Track Signal”, then
+              come back here to see accuracy analytics.
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <MetricCard
+                  title="Tracked Signals"
+                  value={String(signalAnalytics.totalSignals)}
+                  subtitle={`${signalAnalytics.activeSignals.length} active • ${signalAnalytics.completedSignals.length} completed`}
+                  icon={<Radar className="h-5 w-5" />}
+                  tone="blue"
+                />
 
-                  return (
-                    <div
-                      key={stock.symbol}
-                      className="rounded-3xl border border-slate-800 bg-[#15161b] p-5"
-                    >
-                      <div className="flex items-center justify-between gap-4">
-                        <div>
-                          <h3 className="text-xl font-bold text-white">
-                            {stock.symbol}
-                          </h3>
-                          <p className="mt-1 text-sm text-slate-500">
-                            {stock.trades} trades • Win rate{' '}
-                            {formatPercent(winRate)}
-                          </p>
-                        </div>
+                <MetricCard
+                  title="Target Hit Rate"
+                  value={formatPercent(signalAnalytics.targetHitRate)}
+                  subtitle={`${signalAnalytics.targetHitSignals.length} target hits • ${signalAnalytics.stopLossSignals.length} SL hits`}
+                  icon={<CheckCircle2 className="h-5 w-5" />}
+                  tone={
+                    signalAnalytics.targetHitRate >= 60
+                      ? 'green'
+                      : signalAnalytics.targetHitRate >= 40
+                      ? 'yellow'
+                      : 'red'
+                  }
+                />
 
-                        <p
-                          className={`text-xl font-bold ${
-                            stock.pnl >= 0 ? 'text-green-400' : 'text-red-400'
-                          }`}
-                        >
-                          {formatCurrency(stock.pnl)}
-                        </p>
-                      </div>
+                <MetricCard
+                  title="Stop Loss Rate"
+                  value={formatPercent(signalAnalytics.stopLossRate)}
+                  subtitle={`${signalAnalytics.stopLossSignals.length} stop loss hits`}
+                  icon={<XCircle className="h-5 w-5" />}
+                  tone={
+                    signalAnalytics.stopLossRate <= 35
+                      ? 'green'
+                      : signalAnalytics.stopLossRate <= 55
+                      ? 'yellow'
+                      : 'red'
+                  }
+                />
 
-                      <div className="mt-4 grid grid-cols-3 gap-3 text-sm">
-                        <div className="rounded-2xl bg-black/30 p-3">
-                          <p className="text-slate-500">Wins</p>
-                          <p className="font-bold text-green-400">
-                            {stock.wins}
-                          </p>
-                        </div>
-
-                        <div className="rounded-2xl bg-black/30 p-3">
-                          <p className="text-slate-500">Losses</p>
-                          <p className="font-bold text-red-400">
-                            {stock.losses}
-                          </p>
-                        </div>
-
-                        <div className="rounded-2xl bg-black/30 p-3">
-                          <p className="text-slate-500">Brokerage</p>
-                          <p className="font-bold text-white">
-                            {formatCurrency(stock.brokerage)}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+                <MetricCard
+                  title="Saved to Journal"
+                  value={String(signalAnalytics.savedToJournal.length)}
+                  subtitle="Tracked signals converted to trades"
+                  icon={<BarChart3 className="h-5 w-5" />}
+                  tone="neutral"
+                />
               </div>
-            </section>
 
-            <section className="mt-8">
-              <SectionTitle title="Recent Trades" />
+              <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <MetricCard
+                  title="BUY Accuracy"
+                  value={formatPercent(signalAnalytics.buyAccuracy)}
+                  subtitle={`${signalAnalytics.buyTargetHits.length} target hits • ${signalAnalytics.buyStopLossHits.length} SL hits`}
+                  icon={<TrendingUp className="h-5 w-5" />}
+                  tone={
+                    signalAnalytics.buyAccuracy >= 60
+                      ? 'green'
+                      : signalAnalytics.buyAccuracy >= 40
+                      ? 'yellow'
+                      : 'red'
+                  }
+                />
 
-              <div className="space-y-3">
-                {analytics.enrichedTrades.slice(0, 5).map((trade) => (
+                <MetricCard
+                  title="SELL Accuracy"
+                  value={formatPercent(signalAnalytics.sellAccuracy)}
+                  subtitle={`${signalAnalytics.sellTargetHits.length} target hits • ${signalAnalytics.sellStopLossHits.length} SL hits`}
+                  icon={<TrendingDown className="h-5 w-5" />}
+                  tone={
+                    signalAnalytics.sellAccuracy >= 60
+                      ? 'green'
+                      : signalAnalytics.sellAccuracy >= 40
+                      ? 'yellow'
+                      : 'red'
+                  }
+                />
+
+                <MetricCard
+                  title="Avg Signal Score"
+                  value={`${signalAnalytics.averageSignalScore.toFixed(1)}/100`}
+                  subtitle="Average AI score for tracked signals"
+                  icon={<PieChart className="h-5 w-5" />}
+                  tone="blue"
+                />
+
+                <MetricCard
+                  title="Winning Signal Score"
+                  value={`${signalAnalytics.averageWinningSignalScore.toFixed(
+                    1
+                  )}/100`}
+                  subtitle={`Losing avg: ${signalAnalytics.averageLosingSignalScore.toFixed(
+                    1
+                  )}/100`}
+                  icon={<Target className="h-5 w-5" />}
+                  tone="green"
+                />
+              </div>
+
+              <div className="mt-4 rounded-3xl border border-slate-800 bg-[#15161b] p-5">
+                <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                  <div>
+                    <p className="text-sm text-slate-500">Waiting</p>
+                    <p className="mt-1 text-2xl font-bold text-yellow-300">
+                      {
+                        signalAnalytics.activeSignals.filter(
+                          (s) => s.lifecycleStatus === 'WAITING'
+                        ).length
+                      }
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-sm text-slate-500">Triggered</p>
+                    <p className="mt-1 text-2xl font-bold text-blue-400">
+                      {signalAnalytics.triggeredSignals.length}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-sm text-slate-500">Target Hits</p>
+                    <p className="mt-1 text-2xl font-bold text-green-400">
+                      {signalAnalytics.targetHitSignals.length}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-sm text-slate-500">Expired</p>
+                    <p className="mt-1 text-2xl font-bold text-slate-300">
+                      {signalAnalytics.expiredSignals.length}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </section>
+
+        {signalAnalytics.symbolAccuracy.length > 0 && (
+          <section className="mt-10">
+            <SectionTitle title="Signal Accuracy by Symbol" />
+
+            <div className="space-y-3">
+              {signalAnalytics.symbolAccuracy.map((item) => {
+                const completed = item.targetHits + item.stopLossHits;
+                const accuracy =
+                  completed > 0 ? (item.targetHits / completed) * 100 : 0;
+
+                return (
                   <div
-                    key={trade.id}
+                    key={item.symbol}
                     className="rounded-3xl border border-slate-800 bg-[#15161b] p-5"
                   >
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-4">
                       <div>
-                        <div className="flex items-center gap-2">
-                          <h3 className="text-lg font-bold text-white">
-                            {trade.symbol}
-                          </h3>
-                          <span
-                            className={`rounded-full px-3 py-1 text-xs font-bold ${
-                              trade.side === 'BUY'
-                                ? 'bg-green-500/15 text-green-400'
-                                : 'bg-red-500/15 text-red-400'
-                            }`}
-                          >
-                            {trade.side}
-                          </span>
-                        </div>
-
+                        <h3 className="text-xl font-bold text-white">
+                          {item.symbol}
+                        </h3>
                         <p className="mt-1 text-sm text-slate-500">
-                          Entry ₹{trade.entryPrice} → Exit ₹{trade.exitPrice} •
-                          Qty {trade.quantity}
+                          {item.total} tracked • {item.active} active
                         </p>
                       </div>
 
                       <p
-                        className={`text-lg font-bold ${
-                          trade.pnl >= 0 ? 'text-green-400' : 'text-red-400'
+                        className={`text-xl font-bold ${
+                          accuracy >= 60
+                            ? 'text-green-400'
+                            : accuracy >= 40
+                            ? 'text-yellow-400'
+                            : 'text-red-400'
                         }`}
                       >
-                        {formatCurrency(trade.pnl)}
+                        {formatPercent(accuracy)}
+                      </p>
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-3 gap-3 text-sm">
+                      <div className="rounded-2xl bg-black/30 p-3">
+                        <p className="text-slate-500">Target Hits</p>
+                        <p className="font-bold text-green-400">
+                          {item.targetHits}
+                        </p>
+                      </div>
+
+                      <div className="rounded-2xl bg-black/30 p-3">
+                        <p className="text-slate-500">SL Hits</p>
+                        <p className="font-bold text-red-400">
+                          {item.stopLossHits}
+                        </p>
+                      </div>
+
+                      <div className="rounded-2xl bg-black/30 p-3">
+                        <p className="text-slate-500">Active</p>
+                        <p className="font-bold text-blue-400">{item.active}</p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        {tradeAnalytics.stockWise.length > 0 && (
+          <section className="mt-10">
+            <SectionTitle
+              title="Stock-wise Trade P/L"
+              subtitle={
+                tradeAnalytics.mostTradedStock
+                  ? `Most traded: ${tradeAnalytics.mostTradedStock.symbol} (${tradeAnalytics.mostTradedStock.trades} trades)`
+                  : undefined
+              }
+            />
+
+            <div className="space-y-3">
+              {tradeAnalytics.stockWise.map((stock) => {
+                const winRate =
+                  stock.trades > 0 ? (stock.wins / stock.trades) * 100 : 0;
+
+                return (
+                  <div
+                    key={stock.symbol}
+                    className="rounded-3xl border border-slate-800 bg-[#15161b] p-5"
+                  >
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <h3 className="text-xl font-bold text-white">
+                          {stock.symbol}
+                        </h3>
+                        <p className="mt-1 text-sm text-slate-500">
+                          {stock.trades} trades • Win rate{' '}
+                          {formatPercent(winRate)}
+                        </p>
+                      </div>
+
+                      <p
+                        className={`text-xl font-bold ${
+                          stock.pnl >= 0 ? 'text-green-400' : 'text-red-400'
+                        }`}
+                      >
+                        {formatCurrency(stock.pnl)}
+                      </p>
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-3 gap-3 text-sm">
+                      <div className="rounded-2xl bg-black/30 p-3">
+                        <p className="text-slate-500">Wins</p>
+                        <p className="font-bold text-green-400">
+                          {stock.wins}
+                        </p>
+                      </div>
+
+                      <div className="rounded-2xl bg-black/30 p-3">
+                        <p className="text-slate-500">Losses</p>
+                        <p className="font-bold text-red-400">
+                          {stock.losses}
+                        </p>
+                      </div>
+
+                      <div className="rounded-2xl bg-black/30 p-3">
+                        <p className="text-slate-500">Brokerage</p>
+                        <p className="font-bold text-white">
+                          {formatCurrency(stock.brokerage)}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        {signalAnalytics.recentSignals.length > 0 && (
+          <section className="mt-10">
+            <SectionTitle title="Recent Tracked Signals" />
+
+            <div className="space-y-3">
+              {signalAnalytics.recentSignals.map((signal) => (
+                <div
+                  key={signal.id}
+                  className="rounded-3xl border border-slate-800 bg-[#15161b] p-5"
+                >
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-lg font-bold text-white">
+                          {signal.symbol}
+                        </h3>
+
+                        <span
+                          className={`rounded-full px-3 py-1 text-xs font-bold ${
+                            signal.side === 'BUY'
+                              ? 'bg-green-500/15 text-green-400'
+                              : signal.side === 'SELL'
+                              ? 'bg-red-500/15 text-red-400'
+                              : 'bg-slate-700 text-slate-300'
+                          }`}
+                        >
+                          {signal.side}
+                        </span>
+
+                        <SignalStatusBadge status={signal.lifecycleStatus} />
+                      </div>
+
+                      <p className="mt-2 text-sm text-slate-500">
+                        Entry {formatCurrency(signal.entry)} • SL{' '}
+                        {formatCurrency(signal.stopLoss)} • T1{' '}
+                        {formatCurrency(signal.target1)}
+                      </p>
+                    </div>
+
+                    <div className="text-right">
+                      <p className="text-sm text-slate-500">Score</p>
+                      <p className="font-bold text-white">
+                        {signal.sentiment?.signalScore ?? '--'}/100
                       </p>
                     </div>
                   </div>
-                ))}
-              </div>
-            </section>
-          </>
+
+                  <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
+                    <Clock className="h-4 w-4" />
+                    {new Date(signal.createdAt).toLocaleString()}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
         )}
 
         <div className="mt-8 rounded-2xl border border-yellow-500/20 bg-yellow-500/10 p-4 text-sm text-yellow-200">
-          Analytics are for journaling and education only. They do not guarantee
-          future performance.
+          Analytics are for journaling and education only. Signal accuracy is
+          based on locally tracked signals and does not guarantee future
+          performance.
         </div>
       </div>
     </main>
