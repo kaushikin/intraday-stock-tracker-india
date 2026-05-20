@@ -1,5 +1,6 @@
 'use client';
 
+import TradeRulesAlert from '@/components/TradeRulesAlert';
 import { useState } from 'react';
 import Link from 'next/link';
 import { useApp } from '@/contexts/AppContext';
@@ -28,15 +29,26 @@ export default function Dashboard() {
       {/* Header */}
       <div className="flex justify-between items-end">
         <div>
-          <div className="text-emerald-400 text-xs tracking-[3px] font-medium">NSE • INTRADAY</div>
-          <h1 className="text-4xl font-semibold tracking-tighter">Good Morning, Trader</h1>
-          <p className="text-zinc-500 text-sm mt-1">{getCurrentTime()} IST • Market Open</p>
+          <div className="text-emerald-400 text-xs tracking-[3px] font-medium">
+            NSE • INTRADAY
+          </div>
+          <h1 className="text-4xl font-semibold tracking-tighter">
+            Good Morning, Trader
+          </h1>
+          <p className="text-zinc-500 text-sm mt-1">
+            {getCurrentTime()} IST • Market Open
+          </p>
         </div>
         <div className="text-right">
           <div className="text-xs text-zinc-500">TODAY</div>
-          <div className="text-2xl font-mono text-white tabular-nums">{new Date().getDate()}</div>
+          <div className="text-2xl font-mono text-white tabular-nums">
+            {new Date().getDate()}
+          </div>
         </div>
       </div>
+
+      {/* Trade Rules Alert */}
+      <TradeRulesAlert />
 
       {/* Risk Status Banner */}
       {(isTargetReached || isLossLimitReached) && (
