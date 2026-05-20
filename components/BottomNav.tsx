@@ -8,7 +8,8 @@ import {
   Eye,
   LineChart,
   Settings,
-  NotebookText,
+  BookOpen,
+  PieChart,
 } from 'lucide-react';
 
 const navItems = [
@@ -30,7 +31,12 @@ const navItems = [
   {
     href: '/trades',
     label: 'Trades',
-    icon: NotebookText,
+    icon: BookOpen,
+  },
+  {
+    href: '/analytics',
+    label: 'Stats',
+    icon: PieChart,
   },
   {
     href: '/ai-summary',
@@ -49,7 +55,7 @@ export default function BottomNav() {
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-slate-800 bg-[#090a0f]/95 backdrop-blur">
-      <div className="mx-auto grid max-w-3xl grid-cols-6">
+      <div className="mx-auto grid max-w-4xl grid-cols-7">
         {navItems.map((item) => {
           const Icon = item.icon;
           const active = pathname === item.href;
@@ -58,7 +64,7 @@ export default function BottomNav() {
             <Link
               key={item.href}
               href={item.href}
-              className={`flex flex-col items-center justify-center gap-1 px-2 py-3 text-xs ${
+              className={`flex flex-col items-center justify-center gap-1 px-1 py-3 text-[10px] sm:text-xs ${
                 active ? 'text-emerald-400' : 'text-slate-500'
               }`}
             >
