@@ -1,154 +1,335 @@
 'use client';
 
+import { useEffect, useMemo, useState } from 'react';
+import {
+  RotateCcw,
+  Save,
+  Settings,
+  ShieldAlert,
+  Target,
+  TrendingDown,
+} from 'lucide-react';
 import { useApp } from '@/contexts/AppContext';
-import { formatCurrency } from '@/lib/utils';
-import { Trash2, RefreshCw, ExternalLink } from 'lucide-react';
+import {
+  DEFAULT_TRADE_RULES,
+  evaluateTradeRules,
+  loadTradeRuleSettings,
+  resetTradeRuleSettings,
+  saveTradeRuleSettings,
+  type TradeRuleSettings,
+} from '@/lib/tradeRules';
 
-export default function SettingsPage() {
-  const { dailyPL, trades, watchlist, addToWatchlist } = useApp();
+function Field({
+  label,
+  description,
+  value,
+  onChange,
+  type = 'number',
+}: {
+  label: string;
+  description: string;
+  value: number;
+  onChange: (value: number) => void;
+  type?: string;
+}) {
+  return (
+    <div className="rounded-3xl border border-slate-800 bg-[#15161b] p-5">
+      <label className="text-sm font-semibold uppercase tracking-wide text-slate-400">
+        {label}
+      </label>
 
-  const resetAllData = () => {
-    if (confirm('Reset all data? This will clear your watchlist and all trades.')) {
-      localStorage.clear();
-      window.location.reload();
-    }
-  };
+      <p className="mt-1 text-sm text-slate-500">{description}</p>
 
-  const resetTodayTrades = () => {
-    if (confirm('Clear today\'s trades only?')) {
-      const today = new Date().toISOString().split('T')[0];
-      const savedTrades = localStorage.getItem('trades');
-      if (savedTrades) {
-        const parsed = JSON.parse(savedTrades);
-        const filtered = parsed.filter((t: any) => t.date !== today);
-        localStorage.setItem('trades', JSON.stringify(filtered));
-        window.location.reload();
-      }
-    }
-  };
+      <input
+        type={type}
+        value={value}
+        onChange={(event) => onChange(Number(event.target.value))}
+        className="mt-4 w-full rounded-2xl border border-slate-700 bg-black/30 px-4 py-3 text-xl font-bold text-white outline-none focus:border-emerald-500"
+      />
+    </div>
+  );
+}
+
+function StatusCard({
+  title,
+  value,
+  subtitle,
+  tone = 'neutral',
+}: {
+  title: string;
+  value: string;
+  subtitle: string;
+  tone?: 'green' | 'red' | 'yellow' | 'neutral';
+}) {
+  const toneClass =
+    tone === 'green'
+      ? 'text-green-400'
+      : tone === 'red'
+      ? 'text-red-400'
+      : tone === 'yellow'
+      ? 'text-yellow-400'
+      : 'text-white';
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-3xl font-semibold tracking-tight">Settings</h1>
-        <p className="text-zinc-500">Manage your tracker preferences</p>
-      </div>
-
-      {/* Account / Daily Stats */}
-      <div className="bg-zinc-900 rounded-3xl p-6 border border-zinc-800">
-        <div className="text-xs uppercase tracking-widest text-zinc-500 mb-4">TODAY&apos;S SNAPSHOT</div>
-        
-        <div className="space-y-4">
-          <div className="flex justify-between">
-            <span className="text-zinc-400">Net P/L</span>
-            <span className={`font-mono font-semibold ${dailyPL >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-              {dailyPL >= 0 ? '+' : ''}{formatCurrency(dailyPL)}
-            </span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-zinc-400">Trades Logged</span>
-            <span className="font-mono">{trades.length}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-zinc-400">Watchlist Size</span>
-            <span className="font-mono">{watchlist.length} stocks</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Risk Limits */}
-      <div className="bg-zinc-900 rounded-3xl p-6 border border-zinc-800">
-        <div className="text-xs uppercase tracking-widest text-zinc-500 mb-4">DAILY RISK LIMITS</div>
-        
-        <div className="space-y-5">
-          <div>
-            <div className="flex justify-between text-sm mb-1.5">
-              <span>Profit Target</span>
-              <span className="font-medium text-emerald-400">+ ₹500</span>
-            </div>
-            <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
-              <div className="h-2 w-[50%] bg-emerald-500 rounded-full" />
-            </div>
-          </div>
-          
-          <div>
-            <div className="flex justify-between text-sm mb-1.5">
-              <span>Loss Limit</span>
-              <span className="font-medium text-red-400">- ₹500</span>
-            </div>
-            <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
-              <div className="h-2 w-[50%] bg-red-500 rounded-full" />
-            </div>
-          </div>
-        </div>
-        
-        <div className="mt-5 text-xs text-zinc-500">
-          These limits are fixed for this demo. In a future version you will be able to customize them.
-        </div>
-      </div>
-
-      {/* Data Management */}
-      <div className="bg-zinc-900 rounded-3xl p-6 border border-zinc-800">
-        <div className="text-xs uppercase tracking-widest text-zinc-500 mb-4">DATA MANAGEMENT</div>
-        
-        <div className="space-y-3">
-          <button 
-            onClick={resetTodayTrades}
-            className="w-full flex items-center justify-between bg-zinc-950 hover:bg-zinc-800 transition-colors px-5 py-4 rounded-2xl text-left"
-          >
-            <div className="flex items-center gap-3">
-              <RefreshCw className="w-5 h-5 text-amber-400" />
-              <div>
-                <div>Reset Today&apos;s Trades</div>
-                <div className="text-xs text-zinc-500">Keeps watchlist intact</div>
-              </div>
-            </div>
-            <div className="text-xs text-amber-400">CLEAR</div>
-          </button>
-
-          <button 
-            onClick={resetAllData}
-            className="w-full flex items-center justify-between bg-zinc-950 hover:bg-red-950/50 transition-colors px-5 py-4 rounded-2xl text-left border border-red-900/50"
-          >
-            <div className="flex items-center gap-3">
-              <Trash2 className="w-5 h-5 text-red-400" />
-              <div>
-                <div className="text-red-400">Reset Everything</div>
-                <div className="text-xs text-zinc-500">Watchlist + all trades</div>
-              </div>
-            </div>
-            <div className="text-xs text-red-400">DELETE</div>
-          </button>
-        </div>
-      </div>
-
-      {/* About */}
-      <div className="bg-zinc-900 rounded-3xl p-6 border border-zinc-800 text-sm">
-        <div className="text-xs uppercase tracking-widest text-zinc-500 mb-4">ABOUT THIS APP</div>
-        
-        <div className="space-y-4 text-zinc-400">
-          <p>
-            Intraday Stock Tracker India is a free educational tool built to help retail traders develop better risk management habits.
-          </p>
-          
-          <div className="pt-3 border-t border-zinc-800 text-xs">
-            <div className="font-medium text-white mb-1">Future Roadmap</div>
-            <ul className="list-disc list-inside space-y-1 text-zinc-500">
-              <li>Real broker API integration (Zerodha, Upstox, etc.)</li>
-              <li>Multi-day trade history &amp; analytics</li>
-              <li>Export to CSV / PDF reports</li>
-              <li>Custom risk limits per user</li>
-            </ul>
-          </div>
-        </div>
-      </div>
-
-      <div className="text-center text-[10px] text-zinc-500 pt-4">
-        Made for learning • Not for real trading decisions<br />
-        <a href="https://github.com" target="_blank" className="inline-flex items-center gap-1 text-emerald-400 hover:underline mt-1">
-          View source on GitHub <ExternalLink className="w-3 h-3" />
-        </a>
-      </div>
+    <div className="rounded-3xl border border-slate-800 bg-[#15161b] p-5">
+      <p className="text-sm uppercase tracking-wide text-slate-500">{title}</p>
+      <p className={`mt-2 text-3xl font-bold ${toneClass}`}>{value}</p>
+      <p className="mt-2 text-sm text-slate-500">{subtitle}</p>
     </div>
+  );
+}
+
+export default function SettingsPage() {
+  const { trades } = useApp();
+
+  const [settings, setSettings] = useState<TradeRuleSettings>(
+    DEFAULT_TRADE_RULES
+  );
+
+  const [savedMessage, setSavedMessage] = useState('');
+
+  useEffect(() => {
+    setSettings(loadTradeRuleSettings());
+  }, []);
+
+  const status = useMemo(() => {
+    return evaluateTradeRules(trades, settings);
+  }, [trades, settings]);
+
+  function updateField(key: keyof TradeRuleSettings, value: number) {
+    setSavedMessage('');
+
+    setSettings((prev) => ({
+      ...prev,
+      [key]: value,
+    }));
+  }
+
+  function handleSave() {
+    saveTradeRuleSettings(settings);
+    setSettings(loadTradeRuleSettings());
+    setSavedMessage('Trade rules saved successfully.');
+  }
+
+  function handleReset() {
+    resetTradeRuleSettings();
+    setSettings(loadTradeRuleSettings());
+    setSavedMessage('Trade rules reset to default.');
+  }
+
+  return (
+    <main className="min-h-screen bg-[#050608] px-5 pb-28 pt-8 text-white">
+      <div className="mx-auto max-w-4xl">
+        <div className="flex items-start gap-3">
+          <div className="rounded-2xl bg-slate-900 p-3 text-slate-400">
+            <Settings className="h-6 w-6" />
+          </div>
+
+          <div>
+            <h1 className="text-4xl font-bold">Settings</h1>
+            <p className="mt-2 text-slate-400">
+              Configure risk rules and discipline limits for intraday trading.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-6 rounded-2xl border border-yellow-500/20 bg-yellow-500/10 p-4 text-sm text-yellow-200">
+          These rules are local to this browser. They are for discipline and
+          journaling only, not financial advice.
+        </div>
+
+        <section className="mt-8">
+          <h2 className="mb-4 text-sm uppercase tracking-[0.25em] text-slate-500">
+            Trade Rule Settings
+          </h2>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field
+              label="Daily Target"
+              description="When today's net P/L reaches this amount, app suggests stopping."
+              value={settings.dailyTarget}
+              onChange={(value) => updateField('dailyTarget', value)}
+            />
+
+            <Field
+              label="Daily Loss Limit"
+              description="Use a negative value. Example: -500."
+              value={settings.dailyLossLimit}
+              onChange={(value) => updateField('dailyLossLimit', value)}
+            />
+
+            <Field
+              label="Max Trades Per Day"
+              description="Warns when you reach this many trades in one day."
+              value={settings.maxTradesPerDay}
+              onChange={(value) => updateField('maxTradesPerDay', value)}
+            />
+
+            <Field
+              label="Max Loss Streak"
+              description="Warns after this many consecutive losing trades."
+              value={settings.maxLossStreak}
+              onChange={(value) => updateField('maxLossStreak', value)}
+            />
+          </div>
+
+          <div className="mt-5 flex flex-col gap-3 sm:flex-row">
+            <button
+              onClick={handleSave}
+              className="flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-5 py-4 font-bold text-white"
+            >
+              <Save className="h-5 w-5" />
+              Save Rules
+            </button>
+
+            <button
+              onClick={handleReset}
+              className="flex items-center justify-center gap-2 rounded-2xl bg-slate-800 px-5 py-4 font-bold text-slate-300"
+            >
+              <RotateCcw className="h-5 w-5" />
+              Reset Defaults
+            </button>
+          </div>
+
+          {savedMessage && (
+            <div className="mt-4 rounded-2xl border border-green-500/20 bg-green-500/10 p-4 text-sm text-green-300">
+              {savedMessage}
+            </div>
+          )}
+        </section>
+
+        <section className="mt-10">
+          <h2 className="mb-4 text-sm uppercase tracking-[0.25em] text-slate-500">
+            Current Rule Status
+          </h2>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <StatusCard
+              title="Today P/L"
+              value={`₹${status.dailyPL.toFixed(2)}`}
+              subtitle={`Target ₹${settings.dailyTarget} • Loss limit ₹${settings.dailyLossLimit}`}
+              tone={
+                status.dailyTargetHit
+                  ? 'green'
+                  : status.dailyLossLimitHit
+                  ? 'red'
+                  : 'neutral'
+              }
+            />
+
+            <StatusCard
+              title="Trades Today"
+              value={`${status.todayTradesCount}/${settings.maxTradesPerDay}`}
+              subtitle={
+                status.maxTradesHit
+                  ? 'Max trades reached'
+                  : 'Within trade limit'
+              }
+              tone={status.maxTradesHit ? 'yellow' : 'neutral'}
+            />
+
+            <StatusCard
+              title="Loss Streak"
+              value={`${status.lossStreak}/${settings.maxLossStreak}`}
+              subtitle={
+                status.maxLossStreakHit
+                  ? 'Loss streak limit reached'
+                  : 'Loss streak under control'
+              }
+              tone={status.maxLossStreakHit ? 'red' : 'neutral'}
+            />
+
+            <StatusCard
+              title="Trading Status"
+              value={status.shouldStopTrading ? 'Stop' : 'Allowed'}
+              subtitle={
+                status.shouldStopTrading
+                  ? 'Rules suggest no more new trades today'
+                  : 'No rule limits hit yet'
+              }
+              tone={status.shouldStopTrading ? 'red' : 'green'}
+            />
+          </div>
+        </section>
+
+        {status.warnings.length > 0 && (
+          <section className="mt-8 rounded-3xl border border-red-500/30 bg-red-500/10 p-5">
+            <div className="flex items-start gap-3">
+              <ShieldAlert className="h-6 w-6 text-red-400" />
+
+              <div>
+                <h3 className="font-bold text-red-300">Active Warnings</h3>
+
+                <ul className="mt-2 space-y-2">
+                  {status.warnings.map((warning, index) => (
+                    <li key={index} className="text-sm text-slate-300">
+                      • {warning}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </section>
+        )}
+
+        <section className="mt-8 rounded-3xl border border-slate-800 bg-[#15161b] p-5">
+          <div className="flex items-start gap-3">
+            <Target className="h-6 w-6 text-emerald-400" />
+
+            <div>
+              <h3 className="font-bold text-white">Recommended Discipline</h3>
+
+              <ul className="mt-3 space-y-2 text-sm text-slate-400">
+                <li>• Stop after daily target is hit.</li>
+                <li>• Stop immediately after daily loss limit is hit.</li>
+                <li>• Avoid overtrading after max trades are reached.</li>
+                <li>• Take a break after loss streak warning.</li>
+                <li>• Review Analytics and Trade Journal before next session.</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section className="mt-8 rounded-3xl border border-slate-800 bg-[#15161b] p-5">
+          <div className="flex items-start gap-3">
+            <TrendingDown className="h-6 w-6 text-red-400" />
+
+            <div>
+              <h3 className="font-bold text-white">Default Rule Values</h3>
+
+              <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                <div className="rounded-2xl bg-black/30 p-3">
+                  <p className="text-slate-500">Daily Target</p>
+                  <p className="font-bold text-green-400">
+                    ₹{DEFAULT_TRADE_RULES.dailyTarget}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl bg-black/30 p-3">
+                  <p className="text-slate-500">Daily Loss</p>
+                  <p className="font-bold text-red-400">
+                    ₹{DEFAULT_TRADE_RULES.dailyLossLimit}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl bg-black/30 p-3">
+                  <p className="text-slate-500">Max Trades</p>
+                  <p className="font-bold text-white">
+                    {DEFAULT_TRADE_RULES.maxTradesPerDay}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl bg-black/30 p-3">
+                  <p className="text-slate-500">Loss Streak</p>
+                  <p className="font-bold text-white">
+                    {DEFAULT_TRADE_RULES.maxLossStreak}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
   );
 }

@@ -1,13 +1,35 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { Ban, CheckCircle2, ShieldAlert, TriangleAlert } from 'lucide-react';
 import { useApp } from '@/contexts/AppContext';
-import { evaluateTradeRules } from '@/lib/tradeRules';
+import {
+  evaluateTradeRules,
+  loadTradeRuleSettings,
+  type TradeRuleSettings,
+} from '@/lib/tradeRules';
 
 export default function TradeRulesAlert() {
   const { trades } = useApp();
+  const [settings, setSettings] = useState<TradeRuleSettings>(() =>
+    loadTradeRuleSettings()
+  );
 
-  const status = evaluateTradeRules(trades);
+  useEffect(() => {
+    function refreshSettings() {
+      setSettings(loadTradeRuleSettings());
+    }
+
+    window.addEventListener('tradeRulesUpdated', refreshSettings);
+    window.addEventListener('storage', refreshSettings);
+
+    return () => {
+      window.removeEventListener('tradeRulesUpdated', refreshSettings);
+      window.removeEventListener('storage', refreshSettings);
+    };
+  }, []);
+
+  const status = evaluateTradeRules(trades, settings);
 
   if (!status.warnings.length) {
     return null;
@@ -70,6 +92,42 @@ export default function TradeRulesAlert() {
               </li>
             ))}
           </ul>
+
+          <div className="mt-4 grid grid-cols-2 gap-3 text-xs text-slate-400 sm:grid-cols-4">
+            <div className="rounded-2xl bg-black/30 p-3">
+              <p>Daily P/L</p>
+              <p
+                className={
+                  status.dailyPL >= 0
+                    ? 'font-bold text-green-400'
+                    : 'font-bold text-red-400'
+                }
+              >
+                ₹{status.dailyPL.toFixed(2)}
+              </p>
+            </div>
+
+            <div className="rounded-2xl bg-black/30 p-3">
+              <p>Trades</p>
+              <p className="font-bold text-white">
+                {status.todayTradesCount}/{status.rules.maxTradesPerDay}
+              </p>
+            </div>
+
+            <div className="rounded-2xl bg-black/30 p-3">
+              <p>Loss Streak</p>
+              <p className="font-bold text-white">
+                {status.lossStreak}/{status.rules.maxLossStreak}
+              </p>
+            </div>
+
+            <div className="rounded-2xl bg-black/30 p-3">
+              <p>Loss Limit</p>
+              <p className="font-bold text-red-400">
+                ₹{status.rules.dailyLossLimit}
+              </p>
+            </div>
+          </div>
 
           {status.shouldStopTrading && (
             <div className="mt-4 flex items-center gap-2 rounded-2xl bg-black/30 p-3 text-sm text-slate-300">
