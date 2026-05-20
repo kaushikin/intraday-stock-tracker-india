@@ -93,7 +93,6 @@ export async function getAngelSession() {
 
   return session;
 }
-
 export async function getAngelMarketData(
   exchangeTokens: Record<string, string[]>
 ) {
@@ -112,7 +111,25 @@ export async function getAngelMarketData(
     }
   );
 
-  const data = await response.json();
+  const raw = await response.text();
+
+  let data: any;
+
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    console.error("Angel returned non-JSON response:", {
+      status: response.status,
+      raw: raw.slice(0, 300),
+      exchangeTokens,
+    });
+
+    throw new Error(
+      raw.toLowerCase().includes("access")
+        ? "Angel API access denied. Check IP whitelist, segment permission, or commodity/MCX access."
+        : "Angel returned invalid non-JSON response"
+    );
+  }
 
   if (!response.ok || data?.status === false) {
     console.error("Angel market data failed:", data);

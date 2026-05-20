@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Brain,
   RefreshCw,
@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '@/contexts/AppContext';
 import { generateSignals, TradeSignal } from '@/lib/signalEngine';
+import { useAlerts } from '@/contexts/AlertContext';
 
 type AISentiment = {
   label: 'positive' | 'negative' | 'neutral';
@@ -625,35 +626,37 @@ function SignalCard({
       )}
 
       {canSaveToJournal && onSaveToJournal && (
-  <button
-    onClick={onSaveToJournal}
-    disabled={savedToJournal}
-    className={`mt-5 flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 font-semibold ${
-      savedToJournal
-        ? 'cursor-not-allowed bg-green-600/20 text-green-400'
-        : 'bg-green-600 text-white'
-    }`}
-  >
-    <CheckCircle2 className="h-4 w-4" />
-    {savedToJournal ? 'Saved to Journal' : 'Save to Journal'}
-  </button>
-)}
+        <button
+          onClick={onSaveToJournal}
+          disabled={savedToJournal}
+          className={`mt-5 flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 font-semibold ${
+            savedToJournal
+              ? 'cursor-not-allowed bg-green-600/20 text-green-400'
+              : 'bg-green-600 text-white'
+          }`}
+        >
+          <CheckCircle2 className="h-4 w-4" />
+          {savedToJournal ? 'Saved to Journal' : 'Save to Journal'}
+        </button>
+      )}
 
-{onRemoveTracked && (
-  <button
-    onClick={onRemoveTracked}
-    className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl bg-red-600/20 px-4 py-3 font-semibold text-red-400"
-  >
-    <Trash2 className="h-4 w-4" />
-    Remove Tracking
-  </button>
-)}
+      {onRemoveTracked && (
+        <button
+          onClick={onRemoveTracked}
+          className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl bg-red-600/20 px-4 py-3 font-semibold text-red-400"
+        >
+          <Trash2 className="h-4 w-4" />
+          Remove Tracking
+        </button>
+      )}
     </div>
   );
 }
 
 export default function SignalsPage() {
   const { watchlist, prices, updatePrices, addTrade } = useApp();
+  const { addAlert, requestBrowserPermission, browserPermission } = useAlerts();
+  const previousSignalStatusesRef = useRef<Record<string, string>>({});
 
   const [sentiments, setSentiments] = useState<Record<string, AISentiment>>({});
   const [loadingSentiment, setLoadingSentiment] = useState(false);
@@ -720,7 +723,7 @@ export default function SignalsPage() {
         };
       })
     );
-  }, [prices, hydratedTracking]);
+  }, [prices, hydratedTracking, trackedSignals.length]);
 
   async function fetchNewsForSymbol(symbol: string): Promise<NewsItem[]> {
     try {
@@ -853,83 +856,162 @@ export default function SignalsPage() {
     );
   }
 
-function canSaveTrackedSignalToJournal(signal: TrackedSignal) {
-  return (
-    signal.side !== 'NEUTRAL' &&
-    canSaveStatusToJournal(signal.lifecycleStatus)
-  );
-}
-
-function saveTrackedSignalToJournal(signal: TrackedSignal) {
-  if (signal.savedToJournal) {
-    alert('This signal is already saved to the journal.');
-    return;
+  function canSaveTrackedSignalToJournal(signal: TrackedSignal) {
+    return (
+      signal.side !== 'NEUTRAL' &&
+      canSaveStatusToJournal(signal.lifecycleStatus)
+    );
   }
 
-  if (!canSaveTrackedSignalToJournal(signal)) {
-    alert('Only target hit or stop loss hit signals can be saved.');
-    return;
+  function saveTrackedSignalToJournal(signal: TrackedSignal) {
+    if (signal.savedToJournal) {
+      alert('This signal is already saved to the journal.');
+      return;
+    }
+
+    if (!canSaveTrackedSignalToJournal(signal)) {
+      alert('Only target hit or stop loss hit signals can be saved.');
+      return;
+    }
+
+    if (signal.side !== 'BUY' && signal.side !== 'SELL') {
+      alert('Only BUY or SELL signals can be saved.');
+      return;
+    }
+
+    const exitPrice = getExitPriceForJournal(signal);
+
+    if (!exitPrice) {
+      alert('Could not calculate exit price.');
+      return;
+    }
+
+    const quantityText = window.prompt(
+      `Enter quantity for ${signal.symbol}`,
+      '1'
+    );
+
+    if (quantityText === null) return;
+
+    const quantity = Number(quantityText);
+
+    if (!quantity || quantity <= 0) {
+      alert('Enter a valid quantity.');
+      return;
+    }
+
+    const brokerageText = window.prompt('Enter brokerage/charges', '0');
+
+    if (brokerageText === null) return;
+
+    const brokerage = Number(brokerageText || 0);
+
+    if (brokerage < 0) {
+      alert('Brokerage cannot be negative.');
+      return;
+    }
+
+    addTrade({
+      symbol: signal.symbol,
+      side: signal.side,
+      entryPrice: signal.entry,
+      exitPrice,
+      quantity,
+      brokerage,
+    });
+
+    setTrackedSignals((prev) =>
+      prev.map((item) =>
+        item.id === signal.id
+          ? {
+              ...item,
+              savedToJournal: true,
+            }
+          : item
+      )
+    );
+
+    alert(`${signal.symbol} trade saved to journal.`);
   }
 
-  if (signal.side !== 'BUY' && signal.side !== 'SELL') {
-    alert('Only BUY or SELL signals can be saved.');
-    return;
+  function notifySignalStatusChange(signal: TrackedSignal) {
+    const status = signal.lifecycleStatus;
+
+    if (status === 'TRIGGERED') {
+      addAlert({
+        title: `${signal.symbol} Entry Triggered`,
+        message: `${signal.side} signal triggered at ${signal.entry.toFixed(
+          2
+        )}. Watch targets and stop loss.`,
+        type: 'info',
+      });
+      return;
+    }
+
+    if (status === 'TARGET_1_HIT') {
+      addAlert({
+        title: `${signal.symbol} Target 1 Hit`,
+        message: `${signal.side} signal reached Target 1 at ${signal.target1.toFixed(
+          2
+        )}.`,
+        type: 'success',
+      });
+      return;
+    }
+
+    if (status === 'TARGET_2_HIT') {
+      addAlert({
+        title: `${signal.symbol} Target 2 Hit`,
+        message: `${signal.side} signal reached Target 2 at ${signal.target2.toFixed(
+          2
+        )}.`,
+        type: 'success',
+      });
+      return;
+    }
+
+    if (status === 'STOP_LOSS_HIT') {
+      addAlert({
+        title: `${signal.symbol} Stop Loss Hit`,
+        message: `${signal.side} signal hit stop loss at ${signal.stopLoss.toFixed(
+          2
+        )}.`,
+        type: 'danger',
+      });
+      return;
+    }
   }
 
-  const exitPrice = getExitPriceForJournal(signal);
+  useEffect(() => {
+    if (!hydratedTracking) return;
 
-  if (!exitPrice) {
-    alert('Could not calculate exit price.');
-    return;
-  }
+    const previousStatuses = previousSignalStatusesRef.current;
+    const nextStatuses: Record<string, string> = {};
 
-  const quantityText = window.prompt(
-    `Enter quantity for ${signal.symbol}`,
-    '1'
-  );
+    trackedSignals.forEach((signal) => {
+      nextStatuses[signal.id] = signal.lifecycleStatus;
 
-  if (quantityText === null) return;
+      const previousStatus = previousStatuses[signal.id];
 
-  const quantity = Number(quantityText);
+      // First time loading existing signal: don't alert
+      if (!previousStatus) return;
 
-  if (!quantity || quantity <= 0) {
-    alert('Enter a valid quantity.');
-    return;
-  }
+      // Alert only when status actually changes
+      if (previousStatus === signal.lifecycleStatus) return;
 
-  const brokerageText = window.prompt('Enter brokerage/charges', '0');
+      if (
+        signal.lifecycleStatus === 'TRIGGERED' ||
+        signal.lifecycleStatus === 'TARGET_1_HIT' ||
+        signal.lifecycleStatus === 'TARGET_2_HIT' ||
+        signal.lifecycleStatus === 'STOP_LOSS_HIT'
+      ) {
+        notifySignalStatusChange(signal);
+      }
+    });
 
-  if (brokerageText === null) return;
-
-  const brokerage = Number(brokerageText || 0);
-
-  if (brokerage < 0) {
-    alert('Brokerage cannot be negative.');
-    return;
-  }
-
-  addTrade({
-    symbol: signal.symbol,
-    side: signal.side,
-    entryPrice: signal.entry,
-    exitPrice,
-    quantity,
-    brokerage,
-  });
-
-  setTrackedSignals((prev) =>
-    prev.map((item) =>
-      item.id === signal.id
-        ? {
-            ...item,
-            savedToJournal: true,
-          }
-        : item
-    )
-  );
-
-  alert(`${signal.symbol} trade saved to journal.`);
-}
+    previousSignalStatusesRef.current = nextStatuses;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trackedSignals, hydratedTracking]);
 
   useEffect(() => {
     if (!signals.length) return;
@@ -965,6 +1047,19 @@ function saveTrackedSignalToJournal(signal: TrackedSignal) {
               <Brain className="h-4 w-4" />
               AI Check
             </button>
+
+            <button
+              onClick={requestBrowserPermission}
+              className="flex items-center justify-center gap-2 rounded-2xl bg-blue-600 px-4 py-3 font-semibold text-white"
+            >
+              Enable Alerts
+            </button>
+
+            <p className="text-center text-xs text-slate-500">
+              {browserPermission === 'granted'
+                ? 'Browser alerts enabled'
+                : 'In-app alerts active'}
+            </p>
           </div>
         </div>
 
@@ -998,38 +1093,38 @@ function saveTrackedSignalToJournal(signal: TrackedSignal) {
           ) : (
             <div className="space-y-5">
               {activeTrackedSignals.map((signal) => (
-  <SignalCard
-    key={signal.id}
-    signal={signal}
-    sentiment={signal.sentiment}
-    loadingSentiment={false}
-    news={signal.news || []}
-    lifecycleStatus={signal.lifecycleStatus}
-    currentPrice={prices[signal.symbol]?.price || 0}
-    lastCheckedAt={signal.lastCheckedAt}
-    onRemoveTracked={() => removeTrackedSignal(signal.id)}
-    canSaveToJournal={canSaveTrackedSignalToJournal(signal)}
-    savedToJournal={signal.savedToJournal}
-    onSaveToJournal={() => saveTrackedSignalToJournal(signal)}
-  />
-))}
+                <SignalCard
+                  key={signal.id}
+                  signal={signal}
+                  sentiment={signal.sentiment}
+                  loadingSentiment={false}
+                  news={signal.news || []}
+                  lifecycleStatus={signal.lifecycleStatus}
+                  currentPrice={prices[signal.symbol]?.price || 0}
+                  lastCheckedAt={signal.lastCheckedAt}
+                  onRemoveTracked={() => removeTrackedSignal(signal.id)}
+                  canSaveToJournal={canSaveTrackedSignalToJournal(signal)}
+                  savedToJournal={signal.savedToJournal}
+                  onSaveToJournal={() => saveTrackedSignalToJournal(signal)}
+                />
+              ))}
 
               {completedTrackedSignals.map((signal) => (
-  <SignalCard
-    key={signal.id}
-    signal={signal}
-    sentiment={signal.sentiment}
-    loadingSentiment={false}
-    news={signal.news || []}
-    lifecycleStatus={signal.lifecycleStatus}
-    currentPrice={prices[signal.symbol]?.price || 0}
-    lastCheckedAt={signal.lastCheckedAt}
-    onRemoveTracked={() => removeTrackedSignal(signal.id)}
-    canSaveToJournal={canSaveTrackedSignalToJournal(signal)}
-    savedToJournal={signal.savedToJournal}
-    onSaveToJournal={() => saveTrackedSignalToJournal(signal)}
-  />
-))}
+                <SignalCard
+                  key={signal.id}
+                  signal={signal}
+                  sentiment={signal.sentiment}
+                  loadingSentiment={false}
+                  news={signal.news || []}
+                  lifecycleStatus={signal.lifecycleStatus}
+                  currentPrice={prices[signal.symbol]?.price || 0}
+                  lastCheckedAt={signal.lastCheckedAt}
+                  onRemoveTracked={() => removeTrackedSignal(signal.id)}
+                  canSaveToJournal={canSaveTrackedSignalToJournal(signal)}
+                  savedToJournal={signal.savedToJournal}
+                  onSaveToJournal={() => saveTrackedSignalToJournal(signal)}
+                />
+              ))}
             </div>
           )}
         </section>
