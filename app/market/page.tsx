@@ -26,6 +26,23 @@ type MarketQuote = PriceData & {
   name?: string;
 };
 
+type MarketQuoteError = {
+  exchange?: string;
+  symbol?: string;
+  token?: string;
+  chunk?: number;
+  symbols?: string[];
+  tokens?: string[];
+  error?: string;
+};
+
+type MarketQuoteSummary = {
+  requested: number;
+  fetched: number;
+  errors: number;
+  chunkSize: number;
+} | null;
+
 function formatPrice(value: number) {
   if (!value) return '--';
   return `₹${value.toFixed(2)}`;
@@ -160,6 +177,8 @@ export default function MarketPage() {
   const [quotes, setQuotes] = useState<Record<string, MarketQuote>>({});
   const [loading, setLoading] = useState(false);
   const [scanMode, setScanMode] = useState<'WATCH' | 'NIFTY50' | 'ALL'>('NIFTY50');
+  const [quoteErrors, setQuoteErrors] = useState<MarketQuoteError[]>([]);
+  const [quoteSummary, setQuoteSummary] = useState<MarketQuoteSummary>(null);
 
   const symbolsToScan = useMemo(() => {
     if (scanMode === 'NIFTY50') {
@@ -175,6 +194,7 @@ export default function MarketPage() {
 
   const fetchMarketQuotes = useCallback(async () => {
     setLoading(true);
+    setQuoteErrors([]);
 
     try {
       const validSymbols = symbolsToScan.filter((symbol) => INSTRUMENTS[symbol]);
@@ -199,6 +219,9 @@ export default function MarketPage() {
       });
 
       const data = await response.json();
+
+      setQuoteErrors(Array.isArray(data.errors) ? data.errors : []);
+      setQuoteSummary(data.summary || null);
 
       if (!response.ok || !data.success) {
         console.error('Market overview quote error:', data);
@@ -226,8 +249,15 @@ export default function MarketPage() {
       });
 
       setQuotes(nextQuotes);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Market overview fetch failed:', error);
+
+      setQuoteErrors([
+        {
+          exchange: 'UNKNOWN',
+          error: error?.message || 'Market overview fetch failed',
+        },
+      ]);
     } finally {
       setLoading(false);
     }
@@ -323,9 +353,61 @@ export default function MarketPage() {
           Market scanner is for education and tracking only. Not financial advice.
         </div>
 
+        {quoteSummary && (
+          <div
+            className={`mt-4 rounded-2xl border p-4 text-sm ${
+              quoteErrors.length > 0
+                ? 'border-orange-500/30 bg-orange-500/10 text-orange-200'
+                : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+            }`}
+          >
+            <div className="flex items-start gap-3">
+              <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0" />
+
+              <div>
+                <p className="font-bold">
+                  Loaded {quoteSummary.fetched} / {quoteSummary.requested} instruments
+                </p>
+
+                <p className="mt-1 text-xs opacity-80">
+                  Angel requests are grouped by exchange and chunked in batches of{' '}
+                  {quoteSummary.chunkSize}.
+                </p>
+
+                {quoteErrors.length > 0 && (
+                  <div className="mt-3">
+                    <p className="font-semibold">Some quote chunks failed:</p>
+
+                    <ul className="mt-2 space-y-1">
+                      {quoteErrors.slice(0, 4).map((item, index) => (
+                        <li key={index}>
+                          • {item.exchange || 'UNKNOWN'}
+                          {item.symbol ? ` / ${item.symbol}` : ''}
+                          {item.chunk ? ` chunk ${item.chunk}` : ''}:{' '}
+                          {item.error || 'Unknown error'}
+                        </li>
+                      ))}
+                    </ul>
+
+                    {quoteErrors.length > 4 && (
+                      <p className="mt-2 text-xs opacity-80">
+                        +{quoteErrors.length - 4} more quote errors hidden.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         <Section
           title="Market Snapshot"
-          subtitle={`${quoteList.length} instruments loaded`}
+          subtitle={
+            quoteSummary
+              ? `${quoteSummary.fetched}/${quoteSummary.requested} instruments loaded`
+              : `${quoteList.length} instruments loaded`
+          }
           icon={<BarChart3 className="h-5 w-5" />}
         >
           {loading && quoteList.length === 0 ? (
