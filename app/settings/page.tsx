@@ -10,6 +10,7 @@ import {
   TrendingDown,
 } from 'lucide-react';
 import { useApp } from '@/contexts/AppContext';
+import BackupRestorePanel from '@/components/BackupRestorePanel';
 import {
   DEFAULT_TRADE_RULES,
   evaluateTradeRules,
@@ -137,6 +138,8 @@ export default function SettingsPage() {
           These rules are local to this browser. They are for discipline and
           journaling only, not financial advice.
         </div>
+
+        <BackupRestorePanel />
 
         <section className="mt-8">
           <h2 className="mb-4 text-sm uppercase tracking-[0.25em] text-slate-500">
