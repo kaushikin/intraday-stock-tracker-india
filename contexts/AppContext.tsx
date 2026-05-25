@@ -10,6 +10,11 @@ import React, {
 } from 'react';
 import { format } from 'date-fns';
 import { INSTRUMENTS } from '@/lib/instruments';
+import {
+  DEFAULT_TRADE_RULES,
+  loadTradeRuleSettings,
+  type TradeRuleSettings,
+} from '@/lib/tradeRules';
 
 export interface PriceData {
   price: number;
@@ -38,6 +43,7 @@ interface AppContextType {
   prices: Record<string, PriceData>;
   trades: Trade[];
   dailyPL: number;
+  tradeRuleSettings: TradeRuleSettings;
   addToWatchlist: (symbol: string) => void;
   removeFromWatchlist: (symbol: string) => void;
   addTrade: (trade: Omit<Trade, 'id' | 'date' | 'timestamp'>) => void;
@@ -64,18 +70,31 @@ const INITIAL_PRICES: Record<string, PriceData> = {
   ADANIENT: { price: 0, change: 0 },
 };
 
+function calculateTradePL(trade: Trade) {
+  const gross =
+    trade.side === 'BUY'
+      ? (trade.exitPrice - trade.entryPrice) * trade.quantity
+      : (trade.entryPrice - trade.exitPrice) * trade.quantity;
+
+  return gross - trade.brokerage;
+}
+
 export function AppProvider({ children }: { children: ReactNode }) {
   const [watchlist, setWatchlist] = useState<string[]>([
     'RELIANCE',
     'TCS',
     'HDFCBANK',
   ]);
+
   const [prices, setPrices] = useState<Record<string, PriceData>>(INITIAL_PRICES);
   const [trades, setTrades] = useState<Trade[]>([]);
   const [dailyPL, setDailyPL] = useState(0);
   const [isTargetReached, setIsTargetReached] = useState(false);
   const [isLossLimitReached, setIsLossLimitReached] = useState(false);
   const [hydrated, setHydrated] = useState(false);
+
+  const [tradeRuleSettings, setTradeRuleSettings] =
+    useState<TradeRuleSettings>(DEFAULT_TRADE_RULES);
 
   const today = format(new Date(), 'yyyy-MM-dd');
 
@@ -90,7 +109,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setTrades(JSON.parse(savedTrades));
     }
 
+    setTradeRuleSettings(loadTradeRuleSettings());
+
     setHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    function refreshTradeRules() {
+      setTradeRuleSettings(loadTradeRuleSettings());
+    }
+
+    window.addEventListener('tradeRulesUpdated', refreshTradeRules);
+    window.addEventListener('storage', refreshTradeRules);
+
+    return () => {
+      window.removeEventListener('tradeRulesUpdated', refreshTradeRules);
+      window.removeEventListener('storage', refreshTradeRules);
+    };
   }, []);
 
   useEffect(() => {
@@ -103,28 +138,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('trades', JSON.stringify(trades));
   }, [trades, hydrated]);
 
-  const calculateDailyPL = (currentTrades: Trade[]) => {
-    const todayTrades = currentTrades.filter((t) => t.date === today);
+  const calculateDailyPL = useCallback(
+    (currentTrades: Trade[]) => {
+      const todayTrades = currentTrades.filter((trade) => trade.date === today);
 
-    return todayTrades.reduce((sum, trade) => {
-      const plValue =
-        trade.side === 'BUY'
-          ? (trade.exitPrice - trade.entryPrice) * trade.quantity -
-            trade.brokerage
-          : (trade.entryPrice - trade.exitPrice) * trade.quantity -
-            trade.brokerage;
-
-      return sum + plValue;
-    }, 0);
-  };
+      return todayTrades.reduce((sum, trade) => {
+        return sum + calculateTradePL(trade);
+      }, 0);
+    },
+    [today]
+  );
 
   useEffect(() => {
     const pl = calculateDailyPL(trades);
-    setDailyPL(pl);
 
-    setIsTargetReached(pl >= 500);
-    setIsLossLimitReached(pl <= -500);
-  }, [trades, today]);
+    setDailyPL(pl);
+    setIsTargetReached(pl >= tradeRuleSettings.dailyTarget);
+    setIsLossLimitReached(pl <= tradeRuleSettings.dailyLossLimit);
+  }, [trades, calculateDailyPL, tradeRuleSettings]);
 
   const updatePrices = useCallback(async () => {
     if (!watchlist.length) return;
@@ -238,11 +269,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const deleteTrade = (id: string) => {
-    setTrades((prev) => prev.filter((t) => t.id !== id));
+    setTrades((prev) => prev.filter((trade) => trade.id !== id));
   };
 
   const getTodayTrades = () => {
-    return trades.filter((t) => t.date === today);
+    return trades.filter((trade) => trade.date === today);
   };
 
   const getTodayPL = () => {
@@ -256,6 +287,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         prices,
         trades,
         dailyPL,
+        tradeRuleSettings,
         addToWatchlist,
         removeFromWatchlist,
         addTrade,

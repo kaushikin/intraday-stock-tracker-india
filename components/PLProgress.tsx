@@ -1,82 +1,148 @@
 'use client';
 
+import { useEffect, useMemo, useState } from 'react';
 import { useApp } from '@/contexts/AppContext';
 import { formatCurrency } from '@/lib/utils';
+import {
+  DEFAULT_TRADE_RULES,
+  loadTradeRuleSettings,
+  type TradeRuleSettings,
+} from '@/lib/tradeRules';
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function formatLimit(value: number) {
+  const sign = value > 0 ? '+' : value < 0 ? '-' : '';
+  return `${sign}₹${Math.abs(value).toFixed(0)}`;
+}
 
 export default function PLProgress() {
-  const { dailyPL, isTargetReached, isLossLimitReached } = useApp();
-  
-  const target = 500;
-  const lossLimit = -500;
-  const range = target - lossLimit; // 1000
-  const progress = Math.max(0, Math.min(100, ((dailyPL - lossLimit) / range) * 100));
+  const { dailyPL } = useApp();
 
-  const getStatusColor = () => {
-    if (isTargetReached) return 'emerald';
-    if (isLossLimitReached) return 'red';
-    if (dailyPL > 0) return 'emerald';
-    if (dailyPL < 0) return 'red';
-    return 'zinc';
-  };
+  /**
+   * Important:
+   * Do NOT read localStorage inside the initial useState value.
+   * Next.js server render cannot access localStorage, so the server would render
+   * default values while the client immediately renders saved values.
+   * That causes hydration mismatch.
+   */
+  const [settings, setSettings] =
+    useState<TradeRuleSettings>(DEFAULT_TRADE_RULES);
 
-  const statusColor = getStatusColor();
+  useEffect(() => {
+    function refreshSettings() {
+      setSettings(loadTradeRuleSettings());
+    }
+
+    refreshSettings();
+
+    window.addEventListener('tradeRulesUpdated', refreshSettings);
+    window.addEventListener('storage', refreshSettings);
+
+    return () => {
+      window.removeEventListener('tradeRulesUpdated', refreshSettings);
+      window.removeEventListener('storage', refreshSettings);
+    };
+  }, []);
+
+  const progress = useMemo(() => {
+    const min = settings.dailyLossLimit;
+    const max = settings.dailyTarget;
+    const range = max - min;
+
+    if (range <= 0) return 50;
+
+    return clamp(((dailyPL - min) / range) * 100, 0, 100);
+  }, [dailyPL, settings]);
+
+  const zeroMarker = useMemo(() => {
+    const min = settings.dailyLossLimit;
+    const max = settings.dailyTarget;
+    const range = max - min;
+
+    if (range <= 0) return 50;
+
+    return clamp(((0 - min) / range) * 100, 0, 100);
+  }, [settings]);
+
+  const isProfit = dailyPL >= 0;
+  const targetHit = dailyPL >= settings.dailyTarget;
+  const lossLimitHit = dailyPL <= settings.dailyLossLimit;
+
+  const barColor = targetHit
+    ? 'bg-emerald-400'
+    : lossLimitHit
+    ? 'bg-red-500'
+    : isProfit
+    ? 'bg-emerald-500'
+    : 'bg-red-500';
 
   return (
-    <div className="bg-zinc-900 rounded-3xl p-6 border border-zinc-800">
-      <div className="flex justify-between items-start mb-6">
+    <div className="bg-zinc-900 rounded-[2rem] p-6 border border-zinc-800 shadow-lg">
+      <div className="flex items-start justify-between gap-6">
         <div>
-          <div className="text-sm text-zinc-400">TODAY&apos;S P/L</div>
-          <div className={`text-5xl font-semibold tabular-nums tracking-tighter mt-1 font-mono ${dailyPL >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-            {dailyPL >= 0 ? '+' : ''}{formatCurrency(dailyPL)}
+          <div className="text-xs sm:text-sm text-zinc-400 uppercase tracking-wide">
+            Today&apos;s P/L
+          </div>
+
+          <div
+            className={`mt-3 font-mono text-6xl sm:text-7xl font-bold tracking-tighter ${
+              isProfit ? 'text-emerald-400' : 'text-red-400'
+            }`}
+          >
+            {dailyPL >= 0 ? '+' : ''}
+            {formatCurrency(dailyPL)}
           </div>
         </div>
-        
-        <div className="text-right">
-          <div className="text-xs text-zinc-500">TARGET</div>
-          <div className="text-emerald-400 font-medium">+₹500</div>
-          <div className="text-xs text-zinc-500 mt-1">LOSS LIMIT</div>
-          <div className="text-red-400 font-medium">-₹500</div>
+
+        <div className="text-right shrink-0">
+          <div className="text-xs sm:text-sm text-zinc-400 uppercase tracking-wide">
+            Target
+          </div>
+          <div className="mt-1 font-mono text-2xl sm:text-3xl text-emerald-400">
+            {formatLimit(settings.dailyTarget)}
+          </div>
+
+          <div className="mt-5 text-xs sm:text-sm text-zinc-400 uppercase tracking-wide">
+            Loss Limit
+          </div>
+          <div className="mt-1 font-mono text-2xl sm:text-3xl text-red-400">
+            {formatLimit(settings.dailyLossLimit)}
+          </div>
         </div>
       </div>
 
-      {/* Progress Bar */}
-      <div className="relative h-3 bg-zinc-800 rounded-full overflow-hidden mb-2">
-        <div 
-          className={`absolute top-0 left-0 h-full rounded-full transition-all duration-500 ${
-            statusColor === 'emerald' ? 'bg-emerald-500' : 
-            statusColor === 'red' ? 'bg-red-500' : 'bg-zinc-400'
-          }`}
-          style={{ width: `${progress}%` }}
-        />
-        
-        {/* Center marker */}
-        <div className="absolute top-1/2 left-1/2 w-0.5 h-5 bg-white/30 -translate-y-1/2" />
+      <div className="mt-8">
+        <div className="relative h-3 rounded-full bg-zinc-800 overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all duration-500 ${barColor}`}
+            style={{ width: `${progress}%` }}
+          />
+
+          <div
+            className="absolute top-0 h-full w-0.5 bg-zinc-500"
+            style={{ left: `${zeroMarker}%` }}
+          />
+        </div>
+
+        <div className="mt-4 flex justify-between text-sm font-mono text-zinc-500">
+          <span>{formatLimit(settings.dailyLossLimit)}</span>
+          <span>0</span>
+          <span>{formatLimit(settings.dailyTarget)}</span>
+        </div>
       </div>
 
-      <div className="flex justify-between text-xs text-zinc-500 px-1">
-        <div>-₹500</div>
-        <div className="text-center">0</div>
-        <div>+₹500</div>
-      </div>
-
-      {/* Status Messages */}
-      {isTargetReached && (
-        <div className="mt-4 p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl text-emerald-400 text-sm flex items-start gap-3">
-          <div className="text-xl mt-0.5">🎯</div>
-          <div>
-            <div className="font-semibold">Target Reached!</div>
-            <div className="text-xs opacity-80 mt-0.5">Excellent discipline. Consider stopping for today.</div>
-          </div>
+      {targetHit && (
+        <div className="mt-5 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-300">
+          🎯 Daily target reached. Consider stopping for the day.
         </div>
       )}
 
-      {isLossLimitReached && (
-        <div className="mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-2xl text-red-400 text-sm flex items-start gap-3">
-          <div className="text-xl mt-0.5">⚠️</div>
-          <div>
-            <div className="font-semibold">Loss Limit Reached</div>
-            <div className="text-xs opacity-80 mt-0.5">Step back. Review your trades and protect capital.</div>
-          </div>
+      {lossLimitHit && (
+        <div className="mt-5 rounded-2xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
+          🛑 Daily loss limit hit. Stop trading and protect capital.
         </div>
       )}
     </div>
