@@ -26,7 +26,7 @@ export interface PriceData {
   lastUpdated?: string;
 }
 
-interface Trade {
+export interface Trade {
   id: string;
   date: string; // YYYY-MM-DD
   symbol: string;
@@ -36,6 +36,12 @@ interface Trade {
   exitPrice: number;
   brokerage: number;
   timestamp: string;
+
+  // Optional journal quality fields
+  setup?: string;
+  emotion?: string;
+  mistake?: string;
+  notes?: string;
 }
 
 interface AppContextType {
