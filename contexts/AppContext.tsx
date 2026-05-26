@@ -53,6 +53,10 @@ interface AppContextType {
   addToWatchlist: (symbol: string) => void;
   removeFromWatchlist: (symbol: string) => void;
   addTrade: (trade: Omit<Trade, 'id' | 'date' | 'timestamp'>) => void;
+  updateTrade: (
+    id: string,
+    updates: Partial<Omit<Trade, 'id' | 'date' | 'timestamp'>>
+  ) => void;
   deleteTrade: (id: string) => void;
   getTodayTrades: () => Trade[];
   getTodayPL: () => number;
@@ -274,6 +278,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setTrades((prev) => [newTrade, ...prev]);
   };
 
+  const updateTrade = (
+    id: string,
+    updates: Partial<Omit<Trade, 'id' | 'date' | 'timestamp'>>
+  ) => {
+    setTrades((prev) =>
+      prev.map((trade) =>
+        trade.id === id
+          ? {
+              ...trade,
+              ...updates,
+            }
+          : trade
+      )
+    );
+  };
+
   const deleteTrade = (id: string) => {
     setTrades((prev) => prev.filter((trade) => trade.id !== id));
   };
@@ -297,6 +317,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         addToWatchlist,
         removeFromWatchlist,
         addTrade,
+        updateTrade,
         deleteTrade,
         getTodayTrades,
         getTodayPL,

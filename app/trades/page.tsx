@@ -1,12 +1,13 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { useApp } from '@/contexts/AppContext';
+import { useApp, type Trade } from '@/contexts/AppContext';
 import TradeRulesAlert from '@/components/TradeRulesAlert';
 import TradeFormModal from '@/components/TradeFormModal';
+import EditTradeModal from '@/components/EditTradeModal';
 import { formatCurrency, formatPrice } from '@/lib/utils';
 import { downloadCsv } from '@/lib/exportCsv';
-import { Download, Plus, StickyNote, Trash2 } from 'lucide-react';
+import { Download, Pencil, Plus, StickyNote, Trash2 } from 'lucide-react';
 
 function getTradePL(trade: {
   side: 'BUY' | 'SELL';
@@ -85,7 +86,9 @@ function DetailPill({
   );
 }
 
-function getEmotionTone(emotion?: string): 'green' | 'red' | 'yellow' | 'blue' | 'neutral' {
+function getEmotionTone(
+  emotion?: string
+): 'green' | 'red' | 'yellow' | 'blue' | 'neutral' {
   if (!emotion) return 'neutral';
 
   if (emotion === 'Calm') return 'green';
@@ -95,9 +98,12 @@ function getEmotionTone(emotion?: string): 'green' | 'red' | 'yellow' | 'blue' |
   return 'neutral';
 }
 
-function getMistakeTone(mistake?: string): 'green' | 'red' | 'yellow' | 'blue' | 'neutral' {
+function getMistakeTone(
+  mistake?: string
+): 'green' | 'red' | 'yellow' | 'blue' | 'neutral' {
   if (!mistake) return 'neutral';
   if (mistake === 'None') return 'green';
+
   return 'red';
 }
 
@@ -105,6 +111,7 @@ export default function TradesPage() {
   const { trades, getTodayTrades, deleteTrade, dailyPL } = useApp();
 
   const [showTradeModal, setShowTradeModal] = useState(false);
+  const [editingTrade, setEditingTrade] = useState<Trade | null>(null);
 
   const todayTrades = getTodayTrades();
 
@@ -164,6 +171,16 @@ export default function TradesPage() {
     downloadCsv(getCsvFilename('intraday-trades-all'), buildCsvRows(trades));
   }
 
+  function handleDeleteTrade(trade: Trade) {
+    const confirmed = window.confirm(
+      `Delete ${trade.symbol} ${trade.side} trade?`
+    );
+
+    if (!confirmed) return;
+
+    deleteTrade(trade.id);
+  }
+
   return (
     <div className="space-y-8">
       <div className="flex justify-between items-end gap-4">
@@ -188,7 +205,6 @@ export default function TradesPage() {
         <TradeRulesAlert />
       </div>
 
-      {/* Export Buttons */}
       <div className="grid grid-cols-2 gap-3">
         <button
           onClick={handleExportTodayCsv}
@@ -209,7 +225,6 @@ export default function TradesPage() {
         </button>
       </div>
 
-      {/* Summary Bar */}
       <div className="bg-zinc-900 rounded-3xl p-5 flex items-center justify-between border border-zinc-800">
         <div>
           <div className="text-xs text-zinc-400">NET P/L TODAY</div>
@@ -236,7 +251,6 @@ export default function TradesPage() {
         </div>
       </div>
 
-      {/* Trades List */}
       {todayTrades.length > 0 ? (
         <div className="space-y-3">
           {todayTrades.map((trade) => {
@@ -258,7 +272,7 @@ export default function TradesPage() {
                 key={trade.id}
                 className="bg-zinc-900 rounded-2xl p-4 border border-zinc-800 flex flex-col"
               >
-                <div className="flex justify-between items-start">
+                <div className="flex justify-between items-start gap-3">
                   <div className="flex items-center gap-3">
                     <div className="font-mono text-xl font-semibold text-white tracking-tight">
                       {trade.symbol}
@@ -275,13 +289,23 @@ export default function TradesPage() {
                     </div>
                   </div>
 
-                  <button
-                    onClick={() => deleteTrade(trade.id)}
-                    className="text-red-400/70 hover:text-red-400 p-1 -mr-1"
-                    aria-label={`Delete ${trade.symbol} trade`}
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setEditingTrade(trade)}
+                      className="rounded-full bg-zinc-800 p-2 text-zinc-300 hover:bg-zinc-700 hover:text-white"
+                      aria-label={`Edit ${trade.symbol} trade`}
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+
+                    <button
+                      onClick={() => handleDeleteTrade(trade)}
+                      className="rounded-full bg-red-500/10 p-2 text-red-400/80 hover:bg-red-500/20 hover:text-red-300"
+                      aria-label={`Delete ${trade.symbol} trade`}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
 
                 <div className="mt-3 grid grid-cols-3 gap-4 text-sm">
@@ -339,6 +363,7 @@ export default function TradesPage() {
                         <div className="text-[10px] uppercase tracking-wide text-zinc-500">
                           Notes
                         </div>
+
                         <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-zinc-300">
                           {trade.notes}
                         </p>
@@ -389,6 +414,12 @@ export default function TradesPage() {
       <TradeFormModal
         isOpen={showTradeModal}
         onClose={() => setShowTradeModal(false)}
+      />
+
+      <EditTradeModal
+        trade={editingTrade}
+        isOpen={Boolean(editingTrade)}
+        onClose={() => setEditingTrade(null)}
       />
     </div>
   );
