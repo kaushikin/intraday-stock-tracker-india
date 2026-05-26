@@ -6,7 +6,7 @@ import TradeRulesAlert from '@/components/TradeRulesAlert';
 import TradeFormModal from '@/components/TradeFormModal';
 import { formatCurrency, formatPrice } from '@/lib/utils';
 import { downloadCsv } from '@/lib/exportCsv';
-import { Download, Plus, Trash2 } from 'lucide-react';
+import { Download, Plus, StickyNote, Trash2 } from 'lucide-react';
 
 function getTradePL(trade: {
   side: 'BUY' | 'SELL';
@@ -53,6 +53,54 @@ function getCsvFilename(prefix: string) {
   return `${prefix}-${yyyy}-${mm}-${dd}.csv`;
 }
 
+function DetailPill({
+  label,
+  value,
+  tone = 'neutral',
+}: {
+  label: string;
+  value?: string;
+  tone?: 'green' | 'red' | 'yellow' | 'blue' | 'neutral';
+}) {
+  if (!value) return null;
+
+  const toneClass =
+    tone === 'green'
+      ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
+      : tone === 'red'
+      ? 'border-red-500/20 bg-red-500/10 text-red-300'
+      : tone === 'yellow'
+      ? 'border-yellow-500/20 bg-yellow-500/10 text-yellow-200'
+      : tone === 'blue'
+      ? 'border-blue-500/20 bg-blue-500/10 text-blue-300'
+      : 'border-zinc-700 bg-zinc-800/60 text-zinc-300';
+
+  return (
+    <div className={`rounded-2xl border px-3 py-2 ${toneClass}`}>
+      <div className="text-[10px] uppercase tracking-wide opacity-70">
+        {label}
+      </div>
+      <div className="mt-0.5 text-xs font-semibold">{value}</div>
+    </div>
+  );
+}
+
+function getEmotionTone(emotion?: string): 'green' | 'red' | 'yellow' | 'blue' | 'neutral' {
+  if (!emotion) return 'neutral';
+
+  if (emotion === 'Calm') return 'green';
+  if (emotion === 'FOMO' || emotion === 'Revenge') return 'red';
+  if (emotion === 'Fear' || emotion === 'Overconfident') return 'yellow';
+
+  return 'neutral';
+}
+
+function getMistakeTone(mistake?: string): 'green' | 'red' | 'yellow' | 'blue' | 'neutral' {
+  if (!mistake) return 'neutral';
+  if (mistake === 'None') return 'green';
+  return 'red';
+}
+
 export default function TradesPage() {
   const { trades, getTodayTrades, deleteTrade, dailyPL } = useApp();
 
@@ -63,8 +111,11 @@ export default function TradesPage() {
   const todayStats = useMemo(() => {
     return {
       total: todayTrades.length,
-      buy: todayTrades.filter((t) => t.side === 'BUY').length,
-      sell: todayTrades.filter((t) => t.side === 'SELL').length,
+      buy: todayTrades.filter((trade) => trade.side === 'BUY').length,
+      sell: todayTrades.filter((trade) => trade.side === 'SELL').length,
+      withNotes: todayTrades.filter(
+        (trade) => trade.setup || trade.emotion || trade.mistake || trade.notes
+      ).length,
     };
   }, [todayTrades]);
 
@@ -83,6 +134,10 @@ export default function TradesPage() {
         Quantity: trade.quantity,
         Brokerage: trade.brokerage,
         'P/L': Number(pl.toFixed(2)),
+        Setup: trade.setup || '',
+        Emotion: trade.emotion || '',
+        Mistake: trade.mistake || '',
+        Notes: trade.notes || '',
         Timestamp: trade.timestamp,
       };
     });
@@ -174,6 +229,10 @@ export default function TradesPage() {
           {todayStats.buy} BUY • {todayStats.sell} SELL
           <br />
           <span className="text-zinc-600">{trades.length} ALL SAVED</span>
+          <br />
+          <span className="text-zinc-600">
+            {todayStats.withNotes} WITH JOURNAL DETAILS
+          </span>
         </div>
       </div>
 
@@ -190,6 +249,9 @@ export default function TradesPage() {
                 minute: '2-digit',
               }
             );
+
+            const hasJournalDetails =
+              trade.setup || trade.emotion || trade.mistake || trade.notes;
 
             return (
               <div
@@ -244,6 +306,46 @@ export default function TradesPage() {
                     </div>
                   </div>
                 </div>
+
+                {hasJournalDetails && (
+                  <div className="mt-4 rounded-2xl border border-zinc-800 bg-black/20 p-3">
+                    <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                      <StickyNote className="h-4 w-4" />
+                      Journal Details
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                      <DetailPill
+                        label="Setup"
+                        value={trade.setup}
+                        tone="blue"
+                      />
+
+                      <DetailPill
+                        label="Emotion"
+                        value={trade.emotion}
+                        tone={getEmotionTone(trade.emotion)}
+                      />
+
+                      <DetailPill
+                        label="Mistake"
+                        value={trade.mistake}
+                        tone={getMistakeTone(trade.mistake)}
+                      />
+                    </div>
+
+                    {trade.notes && (
+                      <div className="mt-3 rounded-2xl border border-zinc-800 bg-zinc-950 p-3">
+                        <div className="text-[10px] uppercase tracking-wide text-zinc-500">
+                          Notes
+                        </div>
+                        <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-zinc-300">
+                          {trade.notes}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div className="mt-4 pt-4 border-t border-zinc-800 flex justify-between items-center">
                   <div className="text-xs text-zinc-500">{time} IST</div>
