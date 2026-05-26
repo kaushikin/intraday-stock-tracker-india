@@ -18,6 +18,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { useApp } from '@/contexts/AppContext';
+import JournalPatternAnalytics from '@/components/JournalPatternAnalytics';
 
 type StockPL = {
   symbol: string;
@@ -706,6 +707,10 @@ export default function AnalyticsPage() {
             </>
           )}
         </section>
+
+
+
+        <JournalPatternAnalytics />
 
         <section className="mt-10">
           <SectionTitle
