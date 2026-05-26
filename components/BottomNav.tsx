@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import {
   BarChart3,
   Brain,
+  Calculator,
   Eye,
   LineChart,
   Settings,
@@ -40,6 +41,11 @@ const navItems = [
     icon: BookOpen,
   },
   {
+    href: '/calculator',
+    label: 'Calc',
+    icon: Calculator,
+  },
+  {
     href: '/analytics',
     label: 'Stats',
     icon: PieChart,
@@ -61,7 +67,7 @@ export default function BottomNav() {
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-slate-800 bg-[#090a0f]/95 backdrop-blur">
-      <div className="mx-auto grid max-w-5xl grid-cols-8">
+      <div className="mx-auto grid max-w-5xl grid-cols-9">
         {navItems.map((item) => {
           const Icon = item.icon;
           const active = pathname === item.href;
@@ -70,7 +76,7 @@ export default function BottomNav() {
             <Link
               key={item.href}
               href={item.href}
-              className={`flex flex-col items-center justify-center gap-1 px-1 py-3 text-[9px] sm:text-xs ${
+              className={`flex flex-col items-center justify-center gap-1 px-1 py-3 text-[8px] sm:text-xs ${
                 active ? 'text-emerald-400' : 'text-slate-500'
               }`}
             >
