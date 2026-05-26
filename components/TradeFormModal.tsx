@@ -18,7 +18,39 @@ type TradeFormData = {
   quantity: string;
   exitPrice: string;
   brokerage: string;
+  setup: string;
+  emotion: string;
+  mistake: string;
+  notes: string;
 };
+
+const SETUP_OPTIONS = [
+  'Breakout',
+  'Pullback',
+  'Reversal',
+  'Scalping',
+  'News',
+  'Other',
+];
+
+const EMOTION_OPTIONS = [
+  'Calm',
+  'FOMO',
+  'Revenge',
+  'Fear',
+  'Overconfident',
+  'Other',
+];
+
+const MISTAKE_OPTIONS = [
+  'None',
+  'Late Entry',
+  'Early Exit',
+  'No Stop Loss',
+  'Overtrading',
+  'Chased Entry',
+  'Other',
+];
 
 const INITIAL_FORM_DATA: TradeFormData = {
   symbol: '',
@@ -27,6 +59,10 @@ const INITIAL_FORM_DATA: TradeFormData = {
   quantity: '',
   exitPrice: '',
   brokerage: '20',
+  setup: '',
+  emotion: '',
+  mistake: 'None',
+  notes: '',
 };
 
 export default function TradeFormModal({
@@ -44,31 +80,31 @@ export default function TradeFormModal({
   /**
    * Important:
    * React useState reads defaultSymbol only once during first render.
-   * This effect makes quick-trade buttons work correctly by updating
-   * the symbol every time the modal opens with a new defaultSymbol.
+   * This effect makes quick-trade buttons work correctly by refreshing
+   * the form whenever the modal opens.
    */
   useEffect(() => {
     if (!isOpen) return;
 
-    setFormData((prev) => ({
-      ...prev,
+    setFormData({
+      ...INITIAL_FORM_DATA,
       symbol: defaultSymbol,
-    }));
+    });
   }, [isOpen, defaultSymbol]);
 
   const calculatePreview = () => {
     const entry = parseFloat(formData.entryPrice) || 0;
     const exit = parseFloat(formData.exitPrice) || 0;
-    const qty = parseInt(formData.quantity) || 0;
+    const quantity = parseInt(formData.quantity) || 0;
     const brokerage = parseFloat(formData.brokerage) || 0;
 
-    if (!entry || !exit || !qty) return 0;
+    if (!entry || !exit || !quantity) return 0;
 
     if (formData.side === 'BUY') {
-      return (exit - entry) * qty - brokerage;
+      return (exit - entry) * quantity - brokerage;
     }
 
-    return (entry - exit) * qty - brokerage;
+    return (entry - exit) * quantity - brokerage;
   };
 
   const handleChange = (field: keyof TradeFormData, value: string) => {
@@ -78,15 +114,12 @@ export default function TradeFormModal({
     }));
   };
 
-  const resetForm = () => {
+  const handleClose = () => {
     setFormData({
       ...INITIAL_FORM_DATA,
       symbol: defaultSymbol,
     });
-  };
 
-  const handleClose = () => {
-    resetForm();
     onClose();
   };
 
@@ -100,7 +133,7 @@ export default function TradeFormModal({
     const symbol = formData.symbol.toUpperCase().trim();
 
     if (!symbol || !entry || !exit || !quantity) {
-      alert('Please fill all required fields');
+      alert('Please fill all required trade fields');
       return;
     }
 
@@ -111,6 +144,10 @@ export default function TradeFormModal({
       quantity,
       exitPrice: exit,
       brokerage,
+      setup: formData.setup || undefined,
+      emotion: formData.emotion || undefined,
+      mistake: formData.mistake || undefined,
+      notes: formData.notes.trim() || undefined,
     });
 
     setFormData({
@@ -127,14 +164,16 @@ export default function TradeFormModal({
 
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4">
-      <div className="bg-zinc-950 w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl border border-zinc-800 overflow-hidden">
+      <div className="bg-zinc-950 w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl border border-zinc-800 overflow-hidden max-h-[92vh] overflow-y-auto">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-5 border-b border-zinc-800">
+        <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-5 border-b border-zinc-800 bg-zinc-950">
           <div>
             <h2 className="text-xl font-semibold text-white">
               New Trade Entry
             </h2>
-            <p className="text-sm text-zinc-500">Record your intraday trade</p>
+            <p className="text-sm text-zinc-500">
+              Record trade + psychology notes
+            </p>
           </div>
 
           <button
@@ -284,6 +323,88 @@ export default function TradeFormModal({
                   handleChange('brokerage', event.target.value)
                 }
                 className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl px-4 py-3 text-white font-mono focus:outline-none focus:border-emerald-500"
+              />
+            </div>
+          </div>
+
+          {/* Journal Quality Fields */}
+          <div className="rounded-3xl border border-zinc-800 bg-zinc-900/40 p-4 space-y-4">
+            <div>
+              <div className="text-sm font-semibold text-white">
+                Journal Details
+              </div>
+              <p className="mt-1 text-xs text-zinc-500">
+                These fields help Analytics and AI Coach find your patterns.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-zinc-400 mb-1.5">
+                Setup
+              </label>
+
+              <select
+                value={formData.setup}
+                onChange={(event) => handleChange('setup', event.target.value)}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500"
+              >
+                <option value="">Select setup</option>
+                {SETUP_OPTIONS.map((setup) => (
+                  <option key={setup} value={setup}>
+                    {setup}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-zinc-400 mb-1.5">
+                Emotion
+              </label>
+
+              <select
+                value={formData.emotion}
+                onChange={(event) => handleChange('emotion', event.target.value)}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500"
+              >
+                <option value="">Select emotion</option>
+                {EMOTION_OPTIONS.map((emotion) => (
+                  <option key={emotion} value={emotion}>
+                    {emotion}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-zinc-400 mb-1.5">
+                Mistake
+              </label>
+
+              <select
+                value={formData.mistake}
+                onChange={(event) => handleChange('mistake', event.target.value)}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500"
+              >
+                {MISTAKE_OPTIONS.map((mistake) => (
+                  <option key={mistake} value={mistake}>
+                    {mistake}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-zinc-400 mb-1.5">
+                Notes
+              </label>
+
+              <textarea
+                value={formData.notes}
+                onChange={(event) => handleChange('notes', event.target.value)}
+                placeholder="Example: Entered after breakout, volume was strong, but exited early due to fear."
+                rows={4}
+                className="w-full resize-none bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500"
               />
             </div>
           </div>
