@@ -1,11 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { Lock } from 'lucide-react';
 
 export default function LoginPage() {
-  const router = useRouter();
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -22,6 +20,7 @@ export default function LoginPage() {
         headers: {
           'Content-Type': 'application/json',
         },
+        cache: 'no-store',
         body: JSON.stringify({ password }),
       });
 
@@ -33,10 +32,10 @@ export default function LoginPage() {
         return;
       }
 
-      router.push('/dashboard');
-      router.refresh();
+      // Hard redirect so auth cookie is definitely picked up
+      window.location.href = '/dashboard';
     } catch {
-      setError('Something went wrong');
+      setError('Something went wrong. Please try again.');
       setLoading(false);
     }
   };
