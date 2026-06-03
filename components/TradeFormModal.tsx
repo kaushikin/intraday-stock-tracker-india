@@ -11,6 +11,8 @@ interface TradeFormModalProps {
   defaultSymbol?: string;
 }
 
+type TradeOutcome = 'HIT_TARGET' | 'HIT_SL' | 'BREAKEVEN' | 'MANUAL_EXIT';
+
 type TradeFormData = {
   symbol: string;
   side: 'BUY' | 'SELL';
@@ -18,38 +20,24 @@ type TradeFormData = {
   quantity: string;
   exitPrice: string;
   brokerage: string;
+  stopLoss: string;
+  target: string;
+  outcome: '' | TradeOutcome;
   setup: string;
   emotion: string;
   mistake: string;
   notes: string;
 };
 
-const SETUP_OPTIONS = [
-  'Breakout',
-  'Pullback',
-  'Reversal',
-  'Scalping',
-  'News',
-  'Other',
-];
-
-const EMOTION_OPTIONS = [
-  'Calm',
-  'FOMO',
-  'Revenge',
-  'Fear',
-  'Overconfident',
-  'Other',
-];
-
-const MISTAKE_OPTIONS = [
-  'None',
-  'Late Entry',
-  'Early Exit',
-  'No Stop Loss',
-  'Overtrading',
-  'Chased Entry',
-  'Other',
+const SETUP_OPTIONS = ['Breakout', 'Pullback', 'Reversal', 'Scalping', 'News', 'Other'];
+const EMOTION_OPTIONS = ['Calm', 'FOMO', 'Revenge', 'Fear', 'Overconfident', 'Other'];
+const MISTAKE_OPTIONS = ['None', 'Late Entry', 'Early Exit', 'No Stop Loss', 'Overtrading', 'Chased Entry', 'Other'];
+const OUTCOME_OPTIONS: { value: '' | TradeOutcome; label: string }[] = [
+  { value: '', label: 'Select outcome (optional)' },
+  { value: 'HIT_TARGET', label: '✅ Hit Target' },
+  { value: 'HIT_SL', label: '❌ Hit Stop Loss' },
+  { value: 'BREAKEVEN', label: 'Breakeven' },
+  { value: 'MANUAL_EXIT', label: 'Manual Exit' },
 ];
 
 const INITIAL_FORM_DATA: TradeFormData = {
@@ -59,17 +47,16 @@ const INITIAL_FORM_DATA: TradeFormData = {
   quantity: '',
   exitPrice: '',
   brokerage: '20',
+  stopLoss: '',
+  target: '',
+  outcome: '',
   setup: '',
   emotion: '',
   mistake: 'None',
   notes: '',
 };
 
-export default function TradeFormModal({
-  isOpen,
-  onClose,
-  defaultSymbol = '',
-}: TradeFormModalProps) {
+export default function TradeFormModal({ isOpen, onClose, defaultSymbol = '' }: TradeFormModalProps) {
   const { watchlist, addTrade } = useApp();
 
   const [formData, setFormData] = useState<TradeFormData>({
@@ -77,63 +64,63 @@ export default function TradeFormModal({
     symbol: defaultSymbol,
   });
 
-  /**
-   * Important:
-   * React useState reads defaultSymbol only once during first render.
-   * This effect makes quick-trade buttons work correctly by refreshing
-   * the form whenever the modal opens.
-   */
   useEffect(() => {
     if (!isOpen) return;
-
-    setFormData({
-      ...INITIAL_FORM_DATA,
-      symbol: defaultSymbol,
-    });
+    setFormData({ ...INITIAL_FORM_DATA, symbol: defaultSymbol });
   }, [isOpen, defaultSymbol]);
 
   const calculatePreview = () => {
     const entry = parseFloat(formData.entryPrice) || 0;
     const exit = parseFloat(formData.exitPrice) || 0;
-    const quantity = parseInt(formData.quantity) || 0;
-    const brokerage = parseFloat(formData.brokerage) || 0;
+    const qty = parseInt(formData.quantity) || 0;
+    const brok = parseFloat(formData.brokerage) || 0;
+    const sl = parseFloat(formData.stopLoss) || 0;
+    const tgt = parseFloat(formData.target) || 0;
 
-    if (!entry || !exit || !quantity) return 0;
-
-    if (formData.side === 'BUY') {
-      return (exit - entry) * quantity - brokerage;
+    if (!entry || !exit || !qty) {
+      return { pl: 0, risk: 0, reward: 0, rr: '0' };
     }
 
-    return (entry - exit) * quantity - brokerage;
+    const pl = formData.side === 'BUY'
+      ? (exit - entry) * qty - brok
+      : (entry - exit) * qty - brok;
+
+    let risk = 0;
+    if (sl > 0) {
+      risk = formData.side === 'BUY' 
+        ? (entry - sl) * qty + brok 
+        : (sl - entry) * qty + brok;
+    }
+
+    let reward = 0;
+    if (tgt > 0) {
+      reward = formData.side === 'BUY' 
+        ? (tgt - entry) * qty - brok 
+        : (entry - tgt) * qty - brok;
+    }
+
+    const rr = risk > 0 && reward > 0 ? (reward / risk).toFixed(2) : '0';
+
+    return { pl, risk, reward, rr };
   };
+
+  const preview = calculatePreview();
 
   const handleChange = (field: keyof TradeFormData, value: string) => {
-    setFormData((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
+    setFormData(prev => ({ ...prev, [field]: value }));
   };
 
-  const handleClose = () => {
-    setFormData({
-      ...INITIAL_FORM_DATA,
-      symbol: defaultSymbol,
-    });
-
-    onClose();
-  };
-
-  const handleSubmit = (event: React.FormEvent) => {
-    event.preventDefault();
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
 
     const entry = parseFloat(formData.entryPrice);
     const exit = parseFloat(formData.exitPrice);
-    const quantity = parseInt(formData.quantity);
-    const brokerage = parseFloat(formData.brokerage) || 0;
+    const qty = parseInt(formData.quantity);
+    const brok = parseFloat(formData.brokerage) || 0;
     const symbol = formData.symbol.toUpperCase().trim();
 
-    if (!symbol || !entry || !exit || !quantity) {
-      alert('Please fill all required trade fields');
+    if (!symbol || !entry || !exit || !qty) {
+      alert('Please fill Symbol, Entry, Exit and Quantity');
       return;
     }
 
@@ -141,305 +128,172 @@ export default function TradeFormModal({
       symbol,
       side: formData.side,
       entryPrice: entry,
-      quantity,
+      quantity: qty,
       exitPrice: exit,
-      brokerage,
+      brokerage: brok,
+      stopLoss: formData.stopLoss ? parseFloat(formData.stopLoss) : undefined,
+      target: formData.target ? parseFloat(formData.target) : undefined,
+      outcome: formData.outcome === '' ? undefined : formData.outcome,
       setup: formData.setup || undefined,
       emotion: formData.emotion || undefined,
       mistake: formData.mistake || undefined,
       notes: formData.notes.trim() || undefined,
     });
 
-    setFormData({
-      ...INITIAL_FORM_DATA,
-      symbol: '',
-    });
-
+    setFormData({ ...INITIAL_FORM_DATA, symbol: '' });
     onClose();
   };
 
   if (!isOpen) return null;
 
-  const currentPL = calculatePreview();
-
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4">
       <div className="bg-zinc-950 w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl border border-zinc-800 overflow-hidden max-h-[92vh] overflow-y-auto">
-        {/* Header */}
         <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-5 border-b border-zinc-800 bg-zinc-950">
           <div>
-            <h2 className="text-xl font-semibold text-white">
-              New Trade Entry
-            </h2>
-            <p className="text-sm text-zinc-500">
-              Record trade + psychology notes
-            </p>
+            <h2 className="text-xl font-semibold text-white">New Trade Entry</h2>
+            <p className="text-sm text-zinc-500">Record trade + planned SL/Target + psychology</p>
           </div>
-
-          <button
-            onClick={handleClose}
-            className="p-2 hover:bg-zinc-900 rounded-full"
-            aria-label="Close trade form"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <button onClick={onClose} className="p-2 hover:bg-zinc-900 rounded-full"><X className="w-5 h-5" /></button>
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-5">
           {/* Symbol */}
           <div>
-            <label className="block text-sm font-medium text-zinc-400 mb-1.5">
-              Stock Symbol
-            </label>
-
+            <label className="block text-sm font-medium text-zinc-400 mb-1.5">Stock Symbol</label>
             <div className="flex gap-2">
-              <input
-                type="text"
-                value={formData.symbol}
-                onChange={(event) =>
-                  handleChange('symbol', event.target.value.toUpperCase())
-                }
-                placeholder="RELIANCE"
-                className="flex-1 bg-zinc-900 border border-zinc-800 rounded-2xl px-4 py-3 text-white placeholder:text-zinc-500 focus:outline-none focus:border-emerald-500 font-mono uppercase"
-                required
-              />
-
-              <select
-                onChange={(event) => handleChange('symbol', event.target.value)}
-                className="bg-zinc-900 border border-zinc-800 rounded-2xl px-3 text-sm text-zinc-400"
-                value=""
-              >
+              <input type="text" value={formData.symbol} onChange={(e) => handleChange('symbol', e.target.value.toUpperCase())} placeholder="RELIANCE" className="flex-1 bg-zinc-900 border border-zinc-800 rounded-2xl px-4 py-3 text-white placeholder:text-zinc-500 focus:outline-none focus:border-emerald-500 font-mono uppercase" required />
+              <select onChange={(e) => handleChange('symbol', e.target.value)} className="bg-zinc-900 border border-zinc-800 rounded-2xl px-3 text-sm text-zinc-400" value="">
                 <option value="">Quick</option>
-                {watchlist.slice(0, 6).map((symbol) => (
-                  <option key={symbol} value={symbol}>
-                    {symbol}
-                  </option>
-                ))}
+                {watchlist.slice(0, 6).map(s => <option key={s} value={s}>{s}</option>)}
               </select>
             </div>
           </div>
 
           {/* Side */}
           <div>
-            <label className="block text-sm font-medium text-zinc-400 mb-1.5">
-              Trade Side
-            </label>
-
+            <label className="block text-sm font-medium text-zinc-400 mb-1.5">Trade Side</label>
             <div className="flex gap-3">
-              <button
-                type="button"
-                onClick={() => handleChange('side', 'BUY')}
-                className={`flex-1 py-3 rounded-2xl font-semibold transition-all ${
-                  formData.side === 'BUY'
-                    ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/30'
-                    : 'bg-zinc-900 text-zinc-400 border border-zinc-800'
-                }`}
-              >
-                BUY Long
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleChange('side', 'SELL')}
-                className={`flex-1 py-3 rounded-2xl font-semibold transition-all ${
-                  formData.side === 'SELL'
-                    ? 'bg-red-500 text-white shadow-lg shadow-red-500/30'
-                    : 'bg-zinc-900 text-zinc-400 border border-zinc-800'
-                }`}
-              >
-                SELL Short
-              </button>
+              <button type="button" onClick={() => handleChange('side', 'BUY')} className={`flex-1 py-3 rounded-2xl font-semibold transition-all ${formData.side === 'BUY' ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/30' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>BUY Long</button>
+              <button type="button" onClick={() => handleChange('side', 'SELL')} className={`flex-1 py-3 rounded-2xl font-semibold transition-all ${formData.side === 'SELL' ? 'bg-red-500 text-white shadow-lg shadow-red-500/30' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>SELL Short</button>
             </div>
           </div>
 
-          {/* Prices */}
+          {/* Entry + Exit */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-zinc-400 mb-1.5">
-                Entry Price ₹
-              </label>
-
-              <input
-                type="number"
-                step="0.05"
-                value={formData.entryPrice}
-                onChange={(event) =>
-                  handleChange('entryPrice', event.target.value)
-                }
-                placeholder="2450.50"
-                className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl px-4 py-3 text-white font-mono focus:outline-none focus:border-emerald-500"
-                required
-              />
+              <label className="block text-sm font-medium text-zinc-400 mb-1.5">Entry Price ₹</label>
+              <input type="number" step="0.05" value={formData.entryPrice} onChange={(e) => handleChange('entryPrice', e.target.value)} placeholder="2450.50" className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl px-4 py-3 text-white font-mono focus:outline-none focus:border-emerald-500" required />
             </div>
-
             <div>
-              <label className="block text-sm font-medium text-zinc-400 mb-1.5">
-                Exit Price ₹
-              </label>
-
-              <input
-                type="number"
-                step="0.05"
-                value={formData.exitPrice}
-                onChange={(event) =>
-                  handleChange('exitPrice', event.target.value)
-                }
-                placeholder="2468.75"
-                className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl px-4 py-3 text-white font-mono focus:outline-none focus:border-emerald-500"
-                required
-              />
+              <label className="block text-sm font-medium text-zinc-400 mb-1.5">Exit Price ₹</label>
+              <input type="number" step="0.05" value={formData.exitPrice} onChange={(e) => handleChange('exitPrice', e.target.value)} placeholder="2468.75" className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl px-4 py-3 text-white font-mono focus:outline-none focus:border-emerald-500" required />
             </div>
           </div>
 
-          {/* Quantity and Brokerage */}
+          {/* Stop Loss + Target */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-zinc-400 mb-1.5">
-                Quantity
-              </label>
-
-              <input
-                type="number"
-                value={formData.quantity}
-                onChange={(event) =>
-                  handleChange('quantity', event.target.value)
-                }
-                placeholder="25"
-                className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl px-4 py-3 text-white font-mono focus:outline-none focus:border-emerald-500"
-                required
-              />
+              <label className="block text-sm font-medium text-amber-400 mb-1.5">Stop Loss ₹</label>
+              <input type="number" step="0.05" value={formData.stopLoss} onChange={(e) => handleChange('stopLoss', e.target.value)} placeholder="2435.00" className="w-full bg-zinc-900 border border-amber-800/50 rounded-2xl px-4 py-3 text-white font-mono focus:border-amber-500" />
             </div>
-
             <div>
-              <label className="block text-sm font-medium text-zinc-400 mb-1.5">
-                Brokerage ₹
-              </label>
-
-              <input
-                type="number"
-                step="0.01"
-                value={formData.brokerage}
-                onChange={(event) =>
-                  handleChange('brokerage', event.target.value)
-                }
-                className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl px-4 py-3 text-white font-mono focus:outline-none focus:border-emerald-500"
-              />
+              <label className="block text-sm font-medium text-emerald-400 mb-1.5">Target ₹</label>
+              <input type="number" step="0.05" value={formData.target} onChange={(e) => handleChange('target', e.target.value)} placeholder="2485.00" className="w-full bg-zinc-900 border border-emerald-800/50 rounded-2xl px-4 py-3 text-white font-mono focus:border-emerald-500" />
             </div>
           </div>
 
-          {/* Journal Quality Fields */}
+          {/* Risk : Reward Preview */}
+          {(preview.risk > 0 || preview.reward > 0) && (
+            <div className="bg-zinc-900/70 rounded-2xl p-4 border border-zinc-800">
+              <div className="text-xs text-zinc-400 mb-2">TRADE PLAN (Risk : Reward)</div>
+              <div className="grid grid-cols-3 gap-4 text-center">
+                <div>
+                  <div className="text-xs text-amber-400">RISK (if SL hits)</div>
+                  <div className="text-lg font-mono font-semibold text-amber-400">₹{preview.risk.toFixed(0)}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-emerald-400">REWARD (if Target hits)</div>
+                  <div className="text-lg font-mono font-semibold text-emerald-400">₹{preview.reward.toFixed(0)}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-white">R:R RATIO</div>
+                  <div className="text-xl font-mono font-bold text-white">{preview.rr}:1</div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Quantity + Brokerage */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-zinc-400 mb-1.5">Quantity</label>
+              <input type="number" value={formData.quantity} onChange={(e) => handleChange('quantity', e.target.value)} placeholder="25" className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl px-4 py-3 text-white font-mono focus:outline-none focus:border-emerald-500" required />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-zinc-400 mb-1.5">Brokerage ₹</label>
+              <input type="number" step="0.01" value={formData.brokerage} onChange={(e) => handleChange('brokerage', e.target.value)} className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl px-4 py-3 text-white font-mono focus:outline-none focus:border-emerald-500" />
+            </div>
+          </div>
+
+          {/* Outcome */}
+          <div>
+            <label className="block text-sm font-medium text-zinc-400 mb-1.5">Trade Outcome</label>
+            <select value={formData.outcome} onChange={(e) => handleChange('outcome', e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500">
+              {OUTCOME_OPTIONS.map(opt => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Journal Details */}
           <div className="rounded-3xl border border-zinc-800 bg-zinc-900/40 p-4 space-y-4">
             <div>
-              <div className="text-sm font-semibold text-white">
-                Journal Details
-              </div>
-              <p className="mt-1 text-xs text-zinc-500">
-                These fields help Analytics and AI Coach find your patterns.
-              </p>
+              <div className="text-sm font-semibold text-white">Journal Details</div>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-zinc-400 mb-1.5">
-                Setup
-              </label>
-
-              <select
-                value={formData.setup}
-                onChange={(event) => handleChange('setup', event.target.value)}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500"
-              >
+              <label className="block text-sm font-medium text-zinc-400 mb-1.5">Setup</label>
+              <select value={formData.setup} onChange={(e) => handleChange('setup', e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500">
                 <option value="">Select setup</option>
-                {SETUP_OPTIONS.map((setup) => (
-                  <option key={setup} value={setup}>
-                    {setup}
-                  </option>
-                ))}
+                {SETUP_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-zinc-400 mb-1.5">
-                Emotion
-              </label>
-
-              <select
-                value={formData.emotion}
-                onChange={(event) => handleChange('emotion', event.target.value)}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500"
-              >
+              <label className="block text-sm font-medium text-zinc-400 mb-1.5">Emotion</label>
+              <select value={formData.emotion} onChange={(e) => handleChange('emotion', e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500">
                 <option value="">Select emotion</option>
-                {EMOTION_OPTIONS.map((emotion) => (
-                  <option key={emotion} value={emotion}>
-                    {emotion}
-                  </option>
-                ))}
+                {EMOTION_OPTIONS.map(e => <option key={e} value={e}>{e}</option>)}
               </select>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-zinc-400 mb-1.5">
-                Mistake
-              </label>
-
-              <select
-                value={formData.mistake}
-                onChange={(event) => handleChange('mistake', event.target.value)}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500"
-              >
-                {MISTAKE_OPTIONS.map((mistake) => (
-                  <option key={mistake} value={mistake}>
-                    {mistake}
-                  </option>
-                ))}
+              <label className="block text-sm font-medium text-zinc-400 mb-1.5">Mistake</label>
+              <select value={formData.mistake} onChange={(e) => handleChange('mistake', e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500">
+                {MISTAKE_OPTIONS.map(m => <option key={m} value={m}>{m}</option>)}
               </select>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-zinc-400 mb-1.5">
-                Notes
-              </label>
-
-              <textarea
-                value={formData.notes}
-                onChange={(event) => handleChange('notes', event.target.value)}
-                placeholder="Example: Entered after breakout, volume was strong, but exited early due to fear."
-                rows={4}
-                className="w-full resize-none bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500"
-              />
+              <label className="block text-sm font-medium text-zinc-400 mb-1.5">Notes</label>
+              <textarea value={formData.notes} onChange={(e) => handleChange('notes', e.target.value)} placeholder="Why did you take this trade?" rows={3} className="w-full resize-none bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500" />
             </div>
           </div>
 
-          {/* Live P/L Preview */}
+          {/* P/L Preview */}
           <div className="bg-zinc-900/70 rounded-2xl p-4 border border-zinc-800">
             <div className="flex justify-between items-center">
               <span className="text-sm text-zinc-400">Estimated P/L</span>
-
-              <span
-                className={`text-2xl font-mono font-semibold ${
-                  currentPL >= 0 ? 'text-emerald-400' : 'text-red-400'
-                }`}
-              >
-                {currentPL >= 0 ? '+' : ''}
-                {formatCurrency(currentPL)}
+              <span className={`text-2xl font-mono font-semibold ${preview.pl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                {preview.pl >= 0 ? '+' : ''}{formatCurrency(preview.pl)}
               </span>
-            </div>
-
-            <div className="text-[10px] text-zinc-500 mt-1">
-              Based on entered values
             </div>
           </div>
 
-          {/* Submit */}
-          <button
-            type="submit"
-            className="w-full py-4 bg-white text-black font-semibold rounded-2xl active:scale-[0.985] transition-transform flex items-center justify-center gap-2"
-          >
+          <button type="submit" className="w-full py-4 bg-white text-black font-semibold rounded-2xl active:scale-[0.985]">
             RECORD TRADE
           </button>
-
-          <p className="text-center text-[10px] text-zinc-500">
-            This is for journaling only. Trade responsibly.
-          </p>
         </form>
       </div>
     </div>

@@ -18,7 +18,7 @@ import {
 
 export interface PriceData {
   price: number;
-  change: number; // percentage change
+  change: number;
   open?: number;
   high?: number;
   low?: number;
@@ -28,7 +28,7 @@ export interface PriceData {
 
 export interface Trade {
   id: string;
-  date: string; // YYYY-MM-DD
+  date: string;
   symbol: string;
   side: 'BUY' | 'SELL';
   entryPrice: number;
@@ -37,7 +37,11 @@ export interface Trade {
   brokerage: number;
   timestamp: string;
 
-  // Optional journal quality fields
+  // New fields for better accuracy
+  stopLoss?: number;
+  target?: number;
+  outcome?: 'HIT_TARGET' | 'HIT_SL' | 'BREAKEVEN' | 'MANUAL_EXIT';
+
   setup?: string;
   emotion?: string;
   mistake?: string;
