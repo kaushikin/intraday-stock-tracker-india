@@ -26,6 +26,15 @@ export interface PriceData {
   lastUpdated?: string;
 }
 
+export interface CandleData {
+  time: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
 export interface Trade {
   id: string;
   date: string;
@@ -51,6 +60,7 @@ export interface Trade {
 interface AppContextType {
   watchlist: string[];
   prices: Record<string, PriceData>;
+  candles: Record<string, CandleData[]>;
   trades: Trade[];
   dailyPL: number;
   tradeRuleSettings: TradeRuleSettings;
@@ -67,6 +77,7 @@ interface AppContextType {
   isTargetReached: boolean;
   isLossLimitReached: boolean;
   updatePrices: () => Promise<void>;
+  updateCandles: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -101,6 +112,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   ]);
 
   const [prices, setPrices] = useState<Record<string, PriceData>>(INITIAL_PRICES);
+  const [candles, setCandles] = useState<Record<string, CandleData[]>>({});
   const [trades, setTrades] = useState<Trade[]>([]);
   const [dailyPL, setDailyPL] = useState(0);
   const [isTargetReached, setIsTargetReached] = useState(false);
@@ -230,17 +242,63 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [watchlist]);
 
+
+  const updateCandles = useCallback(async () => {
+    if (!watchlist.length) return;
+
+    const validSymbols = watchlist.filter((symbol) => INSTRUMENTS[symbol]);
+
+    if (!validSymbols.length) return;
+
+    try {
+      const response = await fetch('/api/market/candles', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        cache: 'no-store',
+        body: JSON.stringify({
+          symbols: validSymbols,
+          interval: 'FIVE_MINUTE',
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        console.error('Failed to fetch candle data:', data);
+        return;
+      }
+
+      setCandles(data.candles || {});
+    } catch (error) {
+      console.error('Candle update failed:', error);
+    }
+  }, [watchlist]);
+
   useEffect(() => {
     if (!hydrated) return;
 
     updatePrices();
 
-    const interval = setInterval(() => {
+    const priceInterval = setInterval(() => {
       updatePrices();
     }, 10000);
 
-    return () => clearInterval(interval);
+    return () => clearInterval(priceInterval);
   }, [hydrated, updatePrices]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+
+    updateCandles();
+
+    const candleInterval = setInterval(() => {
+      updateCandles();
+    }, 90000);
+
+    return () => clearInterval(candleInterval);
+  }, [hydrated, updateCandles]);
 
   const addToWatchlist = (symbol: string) => {
     const upperSymbol = symbol.toUpperCase().trim();
@@ -315,6 +373,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       value={{
         watchlist,
         prices,
+        candles,
         trades,
         dailyPL,
         tradeRuleSettings,
@@ -328,6 +387,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         isTargetReached,
         isLossLimitReached,
         updatePrices,
+        updateCandles,
       }}
     >
       {children}
