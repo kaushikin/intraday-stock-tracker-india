@@ -138,3 +138,57 @@ export async function getAngelMarketData(
 
   return data;
 }
+export type AngelCandleInterval =
+  | 'ONE_MINUTE'
+  | 'THREE_MINUTE'
+  | 'FIVE_MINUTE'
+  | 'TEN_MINUTE'
+  | 'FIFTEEN_MINUTE'
+  | 'THIRTY_MINUTE'
+  | 'ONE_HOUR'
+  | 'ONE_DAY';
+
+export type AngelCandleRequest = {
+  exchange: string;
+  symboltoken: string;
+  interval: AngelCandleInterval;
+  fromdate: string;
+  todate: string;
+};
+
+export async function getAngelCandleData(request: AngelCandleRequest) {
+  const session = await getAngelSession();
+
+  const response = await fetch(
+    'https://apiconnect.angelone.in/rest/secure/angelbroking/historical/v1/getCandleData',
+    {
+      method: 'POST',
+      headers: angelHeaders(session.jwtToken),
+      body: JSON.stringify(request),
+      cache: 'no-store',
+    }
+  );
+
+  const raw = await response.text();
+
+  let data: any;
+
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    console.error('Angel candle API returned non-JSON response:', {
+      status: response.status,
+      raw: raw.slice(0, 300),
+      request,
+    });
+
+    throw new Error('Angel candle API returned invalid non-JSON response');
+  }
+
+  if (!response.ok || data?.status === false) {
+    console.error('Angel candle data failed:', data);
+    throw new Error(data?.message || 'Failed to fetch Angel candle data');
+  }
+
+  return data;
+}
