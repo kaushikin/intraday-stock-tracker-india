@@ -1,4 +1,5 @@
 import { CandleData, PriceData } from '@/contexts/AppContext';
+import { isFreshSignalWindowOpenIST } from '@/lib/marketHours';
 import { addIndicators } from '@/lib/technicalIndicators';
 
 export type SignalSide = 'BUY' | 'SELL' | 'NEUTRAL';
@@ -114,12 +115,23 @@ export function generateSignalForStock(
 ): TradeSignal {
   const price = priceData?.price || 0;
 
-  if (!rawCandles || rawCandles.length < 30) {
+  if (!isFreshSignalWindowOpenIST()) {
+    return neutralSignal(
+      symbol,
+      [
+        'No fresh intraday signal outside trading window',
+        'Fresh signals are allowed only between 09:30 and 14:45 IST',
+      ],
+      price
+    );
+  }
+
+  if (!rawCandles || rawCandles.length < 20) {
     return neutralSignal(
       symbol,
       [
         'Waiting for enough 5-minute candle data',
-        'Need at least 30 candles for VWAP, EMA, RSI and ATR confirmation',
+        'Need at least 20 candles for VWAP, EMA, RSI and ATR confirmation',
       ],
       price
     );

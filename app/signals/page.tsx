@@ -16,6 +16,11 @@ import {
 import { useApp } from '@/contexts/AppContext';
 import { generateSignals, TradeSignal } from '@/lib/signalEngine';
 import { useAlerts } from '@/contexts/AlertContext';
+import {
+  isFreshSignalWindowOpenIST,
+  isMarketCloseSquareOffTimeIST,
+  minutesSinceISO,
+} from '@/lib/marketHours';
 
 type AISentiment = {
   label: 'positive' | 'negative' | 'neutral';
@@ -49,6 +54,7 @@ type TrackedSignal = TradeSignal & {
 };
 
 const TRACKED_SIGNALS_KEY = 'tracked_signals_v1';
+const SIGNAL_EXPIRY_MINUTES = 20;
 
 function formatPrice(value: number) {
   if (!value) return '--';
@@ -135,11 +141,28 @@ function calculateLifecycleStatus(
   signal: TrackedSignal,
   currentPrice: number
 ): SignalLifecycleStatus {
-  if (!currentPrice) {
+  if (isTerminalStatus(signal.lifecycleStatus)) {
     return signal.lifecycleStatus;
   }
 
-  if (isTerminalStatus(signal.lifecycleStatus)) {
+  /**
+   * Expire non-completed intraday signals near market close.
+   */
+  if (isMarketCloseSquareOffTimeIST()) {
+    return 'EXPIRED';
+  }
+
+  /**
+   * If entry is not triggered within 20 minutes, setup is considered stale.
+   */
+  if (
+    signal.lifecycleStatus === 'WAITING' &&
+    minutesSinceISO(signal.createdAt) >= SIGNAL_EXPIRY_MINUTES
+  ) {
+    return 'EXPIRED';
+  }
+
+  if (!currentPrice) {
     return signal.lifecycleStatus;
   }
 
@@ -812,6 +835,11 @@ export default function SignalsPage() {
   }
 
   function trackSignal(signal: TradeSignal) {
+    if (!isFreshSignalWindowOpenIST()) {
+      alert('Fresh intraday signals can be tracked only between 09:30 and 14:45 IST.');
+      return;
+    }
+
     if (signal.side === 'NEUTRAL') {
       alert('Neutral signals cannot be tracked.');
       return;

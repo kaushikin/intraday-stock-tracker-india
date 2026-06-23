@@ -15,6 +15,7 @@ import {
   loadTradeRuleSettings,
   type TradeRuleSettings,
 } from '@/lib/tradeRules';
+import { isIndianMarketOpen } from '@/lib/marketHours';
 
 export interface PriceData {
   price: number;
@@ -279,10 +280,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!hydrated) return;
 
+    // Fetch once on app load for display.
     updatePrices();
 
+    // Avoid repeated Angel quote calls outside market hours.
+    if (!isIndianMarketOpen()) {
+      return;
+    }
+
     const priceInterval = setInterval(() => {
-      updatePrices();
+      if (isIndianMarketOpen()) {
+        updatePrices();
+      }
     }, 10000);
 
     return () => clearInterval(priceInterval);
@@ -291,11 +300,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!hydrated) return;
 
+    // Fetch once on app load. Outside market hours this can load previous session candles.
     updateCandles();
 
+    // Historical candle API has stricter rate limits, so do not poll after hours.
+    if (!isIndianMarketOpen()) {
+      return;
+    }
+
     const candleInterval = setInterval(() => {
-      updateCandles();
-    }, 90000);
+      if (isIndianMarketOpen()) {
+        updateCandles();
+      }
+    }, 120000);
 
     return () => clearInterval(candleInterval);
   }, [hydrated, updateCandles]);
