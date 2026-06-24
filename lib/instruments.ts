@@ -8,6 +8,20 @@ export type Instrument = {
 };
 
 export const INSTRUMENTS: Record<string, Instrument> = {
+  NIFTY: {
+    symbol: "NIFTY",
+    tradingSymbol: "NIFTY",
+    exchange: "NSE",
+    token: "99926000",
+    name: "NIFTY 50",
+  },
+  BANKNIFTY: {
+    symbol: "BANKNIFTY",
+    tradingSymbol: "BANKNIFTY",
+    exchange: "NSE",
+    token: "99926009",
+    name: "NIFTY BANK",
+  },
   ADANIENT: {
     symbol: "ADANIENT",
     tradingSymbol: "ADANIENT-EQ",
