@@ -251,6 +251,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     if (!validSymbols.length) return;
 
+    const indexSymbols = ['NIFTY', 'BANKNIFTY'].filter(
+      (symbol) => INSTRUMENTS[symbol]
+    );
+
+    const candleSymbols = Array.from(
+      new Set([...validSymbols, ...indexSymbols])
+    );
+
     try {
       const response = await fetch('/api/market/candles', {
         method: 'POST',
@@ -259,7 +267,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         },
         cache: 'no-store',
         body: JSON.stringify({
-          symbols: validSymbols,
+          symbols: candleSymbols,
           interval: 'FIVE_MINUTE',
         }),
       });

@@ -75,7 +75,7 @@ function createBuySignal(
     riskPerShare: round2(risk),
     rewardPerShare: round2(target1 - entry),
     riskReward: round2((target1 - entry) / risk),
-    reasons: [...reasons, `BUY score: ${score}/10`],
+    reasons: [...reasons, `BUY score: ${score}/12`],
     status: score >= 8 ? 'STRONG_BUY_WATCH' : 'BUY_WATCH',
   };
 }
@@ -103,15 +103,163 @@ function createSellSignal(
     riskPerShare: round2(risk),
     rewardPerShare: round2(entry - target1),
     riskReward: round2((entry - target1) / risk),
-    reasons: [...reasons, `SELL score: ${score}/10`],
+    reasons: [...reasons, `SELL score: ${score}/12`],
     status: score >= 8 ? 'STRONG_SELL_WATCH' : 'SELL_WATCH',
+  };
+}
+
+
+type IndexTrend = 'BULLISH' | 'BEARISH' | 'NEUTRAL' | 'UNKNOWN';
+
+type IndexConfirmation = {
+  blocked: boolean;
+  scoreBoost: number;
+  reasons: string[];
+};
+
+const BANK_FINANCE_SYMBOLS = new Set([
+  'HDFCBANK',
+  'ICICIBANK',
+  'AXISBANK',
+  'SBIN',
+  'KOTAKBANK',
+  'INDUSINDBK',
+  'BANKBARODA',
+  'PNB',
+  'FEDERALBNK',
+  'IDFCFIRSTB',
+  'AUBANK',
+  'BAJFINANCE',
+  'BAJAJFINSV',
+]);
+
+function isBankOrFinanceStock(symbol: string) {
+  return BANK_FINANCE_SYMBOLS.has(symbol);
+}
+
+function getIndexTrend(rawCandles: CandleData[]): IndexTrend {
+  if (!rawCandles || rawCandles.length < 20) {
+    return 'UNKNOWN';
+  }
+
+  const candles = addIndicators(rawCandles);
+  const latest = candles[candles.length - 1];
+  const previous = candles[candles.length - 2];
+
+  const vwap = latest.vwap || 0;
+  const ema20 = latest.ema20 || 0;
+  const ema50 = latest.ema50 || 0;
+  const rsi = latest.rsi14 || 50;
+  const previousRsi = previous.rsi14 || 50;
+
+  let bullishScore = 0;
+  let bearishScore = 0;
+
+  if (vwap > 0 && latest.close > vwap) bullishScore += 1;
+  if (latest.close > ema20) bullishScore += 1;
+  if (ema20 >= ema50) bullishScore += 1;
+  if (rsi >= 50 && rsi >= previousRsi) bullishScore += 1;
+
+  if (vwap > 0 && latest.close < vwap) bearishScore += 1;
+  if (latest.close < ema20) bearishScore += 1;
+  if (ema20 <= ema50) bearishScore += 1;
+  if (rsi <= 50 && rsi <= previousRsi) bearishScore += 1;
+
+  if (bullishScore >= 3 && bullishScore > bearishScore) {
+    return 'BULLISH';
+  }
+
+  if (bearishScore >= 3 && bearishScore > bullishScore) {
+    return 'BEARISH';
+  }
+
+  return 'NEUTRAL';
+}
+
+function getIndexConfirmation(
+  symbol: string,
+  side: SignalSide,
+  allCandles: Record<string, CandleData[]>
+): IndexConfirmation {
+  const reasons: string[] = [];
+  let scoreBoost = 0;
+
+  const niftyTrend = getIndexTrend(allCandles.NIFTY || []);
+  const bankNiftyTrend = getIndexTrend(allCandles.BANKNIFTY || []);
+  const needsBankNifty = isBankOrFinanceStock(symbol);
+
+  if (side === 'BUY') {
+    if (niftyTrend === 'BEARISH') {
+      return {
+        blocked: true,
+        scoreBoost: 0,
+        reasons: ['No trade: NIFTY trend opposes BUY setup'],
+      };
+    }
+
+    if (niftyTrend === 'BULLISH') {
+      scoreBoost += 1;
+      reasons.push('NIFTY trend supports BUY');
+    }
+
+    if (needsBankNifty) {
+      if (bankNiftyTrend === 'BEARISH') {
+        return {
+          blocked: true,
+          scoreBoost: 0,
+          reasons: ['No trade: BANKNIFTY trend opposes bank/finance BUY setup'],
+        };
+      }
+
+      if (bankNiftyTrend === 'BULLISH') {
+        scoreBoost += 1;
+        reasons.push('BANKNIFTY confirms bank/finance BUY');
+      }
+    }
+  }
+
+  if (side === 'SELL') {
+    if (niftyTrend === 'BULLISH') {
+      return {
+        blocked: true,
+        scoreBoost: 0,
+        reasons: ['No trade: NIFTY trend opposes SELL setup'],
+      };
+    }
+
+    if (niftyTrend === 'BEARISH') {
+      scoreBoost += 1;
+      reasons.push('NIFTY trend supports SELL');
+    }
+
+    if (needsBankNifty) {
+      if (bankNiftyTrend === 'BULLISH') {
+        return {
+          blocked: true,
+          scoreBoost: 0,
+          reasons: ['No trade: BANKNIFTY trend opposes bank/finance SELL setup'],
+        };
+      }
+
+      if (bankNiftyTrend === 'BEARISH') {
+        scoreBoost += 1;
+        reasons.push('BANKNIFTY confirms bank/finance SELL');
+      }
+    }
+  }
+
+  return {
+    blocked: false,
+    scoreBoost,
+    reasons,
   };
 }
 
 export function generateSignalForStock(
   symbol: string,
   priceData?: PriceData,
-  rawCandles: CandleData[] = []
+  rawCandles: CandleData[] = [],
+  allCandles: Record<string, CandleData[]> = {}
 ): TradeSignal {
   const price = priceData?.price || 0;
 
@@ -282,10 +430,42 @@ export function generateSignalForStock(
   const MIN_SCORE = 7;
 
   if (buyScore >= MIN_SCORE && buyScore > sellScore) {
+    const indexConfirmation = getIndexConfirmation(symbol, 'BUY', allCandles);
+
+    if (indexConfirmation.blocked) {
+      return neutralSignal(
+        symbol,
+        [
+          ...indexConfirmation.reasons,
+          `BUY score before index filter: ${buyScore}/10`,
+        ],
+        entryPrice
+      );
+    }
+
+    buyScore += indexConfirmation.scoreBoost;
+    buyReasons.push(...indexConfirmation.reasons);
+
     return createBuySignal(symbol, entryPrice, atr, buyReasons, buyScore);
   }
 
   if (sellScore >= MIN_SCORE && sellScore > buyScore) {
+    const indexConfirmation = getIndexConfirmation(symbol, 'SELL', allCandles);
+
+    if (indexConfirmation.blocked) {
+      return neutralSignal(
+        symbol,
+        [
+          ...indexConfirmation.reasons,
+          `SELL score before index filter: ${sellScore}/10`,
+        ],
+        entryPrice
+      );
+    }
+
+    sellScore += indexConfirmation.scoreBoost;
+    sellReasons.push(...indexConfirmation.reasons);
+
     return createSellSignal(symbol, entryPrice, atr, sellReasons, sellScore);
   }
 
@@ -307,6 +487,11 @@ export function generateSignals(
   candles: Record<string, CandleData[]> = {}
 ): TradeSignal[] {
   return watchlist.map((symbol) =>
-    generateSignalForStock(symbol, prices[symbol], candles[symbol] || [])
+    generateSignalForStock(
+      symbol,
+      prices[symbol],
+      candles[symbol] || [],
+      candles
+    )
   );
 }
