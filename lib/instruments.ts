@@ -4,7 +4,7 @@ export type Instrument = {
   exchange: "NSE" | "BSE" | "MCX";
   token: string;
   name: string;
-  category?: "NIFTY50" | "NATURAL_RESOURCES";
+  category?: "NIFTY50" | "NATURAL_RESOURCES" | "INDEX";
 };
 
 export const INSTRUMENTS: Record<string, Instrument> = {
@@ -14,6 +14,7 @@ export const INSTRUMENTS: Record<string, Instrument> = {
     exchange: "NSE",
     token: "99926000",
     name: "NIFTY 50",
+    category: "INDEX",
   },
   BANKNIFTY: {
     symbol: "BANKNIFTY",
@@ -21,6 +22,7 @@ export const INSTRUMENTS: Record<string, Instrument> = {
     exchange: "NSE",
     token: "99926009",
     name: "NIFTY BANK",
+    category: "INDEX",
   },
   ADANIENT: {
     symbol: "ADANIENT",
@@ -406,9 +408,11 @@ export const INSTRUMENTS: Record<string, Instrument> = {
   },
 };
 
-export const NIFTY50_SYMBOLS = Object.keys(INSTRUMENTS).filter(
-  (symbol) => INSTRUMENTS[symbol].category !== "NATURAL_RESOURCES"
-);
+export const NIFTY50_SYMBOLS = Object.keys(INSTRUMENTS).filter((symbol) => {
+  const category = INSTRUMENTS[symbol].category;
+
+  return category !== "NATURAL_RESOURCES" && category !== "INDEX";
+});
 
 export const NATURAL_RESOURCES_SYMBOLS = [
   "CRUDEOIL",
