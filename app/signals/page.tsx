@@ -16,6 +16,11 @@ import {
 import { useApp } from '@/contexts/AppContext';
 import { generateSignals, TradeSignal } from '@/lib/signalEngine';
 import { useAlerts } from '@/contexts/AlertContext';
+import {
+  isFreshSignalWindowOpenIST,
+  isMarketCloseSquareOffTimeIST,
+  minutesSinceISO,
+} from '@/lib/marketHours';
 
 type AISentiment = {
   label: 'positive' | 'negative' | 'neutral';
@@ -49,6 +54,7 @@ type TrackedSignal = TradeSignal & {
 };
 
 const TRACKED_SIGNALS_KEY = 'tracked_signals_v1';
+const SIGNAL_EXPIRY_MINUTES = 20;
 
 function formatPrice(value: number) {
   if (!value) return '--';
@@ -69,7 +75,6 @@ function createId() {
 
 function isTerminalStatus(status: SignalLifecycleStatus) {
   return (
-    status === 'TARGET_1_HIT' ||
     status === 'TARGET_2_HIT' ||
     status === 'STOP_LOSS_HIT' ||
     status === 'EXPIRED'
@@ -111,7 +116,6 @@ function getStatusClass(status: SignalLifecycleStatus) {
 
 function canSaveStatusToJournal(status: SignalLifecycleStatus) {
   return (
-    status === 'TARGET_1_HIT' ||
     status === 'TARGET_2_HIT' ||
     status === 'STOP_LOSS_HIT'
   );
@@ -137,11 +141,28 @@ function calculateLifecycleStatus(
   signal: TrackedSignal,
   currentPrice: number
 ): SignalLifecycleStatus {
-  if (!currentPrice) {
+  if (isTerminalStatus(signal.lifecycleStatus)) {
     return signal.lifecycleStatus;
   }
 
-  if (isTerminalStatus(signal.lifecycleStatus)) {
+  /**
+   * Expire non-completed intraday signals near market close.
+   */
+  if (isMarketCloseSquareOffTimeIST()) {
+    return 'EXPIRED';
+  }
+
+  /**
+   * If entry is not triggered within 20 minutes, setup is considered stale.
+   */
+  if (
+    signal.lifecycleStatus === 'WAITING' &&
+    minutesSinceISO(signal.createdAt) >= SIGNAL_EXPIRY_MINUTES
+  ) {
+    return 'EXPIRED';
+  }
+
+  if (!currentPrice) {
     return signal.lifecycleStatus;
   }
 
@@ -654,7 +675,8 @@ function SignalCard({
 }
 
 export default function SignalsPage() {
-  const { watchlist, prices, updatePrices, addTrade } = useApp();
+  const { watchlist, prices, candles, updatePrices, updateCandles, addTrade } =
+    useApp();
   const { addAlert, requestBrowserPermission, browserPermission } = useAlerts();
   const previousSignalStatusesRef = useRef<Record<string, string>>({});
 
@@ -667,8 +689,8 @@ export default function SignalsPage() {
   const [hydratedTracking, setHydratedTracking] = useState(false);
 
   const signals = useMemo(() => {
-    return generateSignals(watchlist, prices);
-  }, [watchlist, prices]);
+    return generateSignals(watchlist, prices, candles);
+  }, [watchlist, prices, candles]);
 
   const activeSignals = signals.filter((s) => s.side !== 'NEUTRAL');
   const neutralSignals = signals.filter((s) => s.side === 'NEUTRAL');
@@ -813,6 +835,11 @@ export default function SignalsPage() {
   }
 
   function trackSignal(signal: TradeSignal) {
+    if (!isFreshSignalWindowOpenIST()) {
+      alert('Fresh intraday signals can be tracked only between 09:30 and 14:45 IST.');
+      return;
+    }
+
     if (signal.side === 'NEUTRAL') {
       alert('Neutral signals cannot be tracked.');
       return;
@@ -1033,7 +1060,10 @@ export default function SignalsPage() {
 
           <div className="flex flex-col gap-2">
             <button
-              onClick={() => updatePrices()}
+              onClick={() => {
+                updatePrices();
+                updateCandles();
+              }}
               className="flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3 font-semibold text-white"
             >
               <RefreshCw className="h-4 w-4" />
