@@ -680,6 +680,7 @@ export default function SignalsPage() {
   const { addAlert, requestBrowserPermission, browserPermission } = useAlerts();
   const previousSignalStatusesRef = useRef<Record<string, string>>({});
 
+  const [mounted, setMounted] = useState(false);
   const [sentiments, setSentiments] = useState<Record<string, AISentiment>>({});
   const [loadingSentiment, setLoadingSentiment] = useState(false);
   const [newsBySymbol, setNewsBySymbol] = useState<Record<string, NewsItem[]>>(
@@ -702,6 +703,10 @@ export default function SignalsPage() {
   const completedTrackedSignals = trackedSignals.filter((signal) =>
     isTerminalStatus(signal.lifecycleStatus)
   );
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     try {
@@ -1086,7 +1091,7 @@ export default function SignalsPage() {
             </button>
 
             <p className="text-center text-xs text-slate-500">
-              {browserPermission === 'granted'
+              {mounted && browserPermission === 'granted'
                 ? 'Browser alerts enabled'
                 : 'In-app alerts active'}
             </p>
