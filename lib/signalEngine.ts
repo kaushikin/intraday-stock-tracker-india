@@ -138,7 +138,7 @@ function isBankOrFinanceStock(symbol: string) {
 }
 
 function getIndexTrend(rawCandles: CandleData[]): IndexTrend {
-  if (!rawCandles || rawCandles.length < 20) {
+  if (!rawCandles || rawCandles.length < 12) {
     return 'UNKNOWN';
   }
 
@@ -191,7 +191,7 @@ function getIndexConfirmation(
   if (side === 'BUY') {
     if (niftyTrend === 'BEARISH') {
       return {
-        blocked: true,
+        blocked: false,
         scoreBoost: 0,
         reasons: ['No trade: NIFTY trend opposes BUY setup'],
       };
@@ -205,7 +205,7 @@ function getIndexConfirmation(
     if (needsBankNifty) {
       if (bankNiftyTrend === 'BEARISH') {
         return {
-          blocked: true,
+          blocked: false,
           scoreBoost: 0,
           reasons: ['No trade: BANKNIFTY trend opposes bank/finance BUY setup'],
         };
@@ -221,7 +221,7 @@ function getIndexConfirmation(
   if (side === 'SELL') {
     if (niftyTrend === 'BULLISH') {
       return {
-        blocked: true,
+        blocked: false,
         scoreBoost: 0,
         reasons: ['No trade: NIFTY trend opposes SELL setup'],
       };
@@ -235,7 +235,7 @@ function getIndexConfirmation(
     if (needsBankNifty) {
       if (bankNiftyTrend === 'BULLISH') {
         return {
-          blocked: true,
+          blocked: false,
           scoreBoost: 0,
           reasons: ['No trade: BANKNIFTY trend opposes bank/finance SELL setup'],
         };
@@ -274,12 +274,12 @@ export function generateSignalForStock(
     );
   }
 
-  if (!rawCandles || rawCandles.length < 20) {
+  if (!rawCandles || rawCandles.length < 12) {
     return neutralSignal(
       symbol,
       [
         'Waiting for enough 5-minute candle data',
-        'Need at least 20 candles for VWAP, EMA, RSI and ATR confirmation',
+        'Need at least 12 candles for VWAP, EMA, RSI and ATR confirmation',
       ],
       price
     );
@@ -427,7 +427,7 @@ export function generateSignalForStock(
     sellReasons.push('Price is weak but not at extreme day low');
   }
 
-  const MIN_SCORE = 7;
+  const MIN_SCORE = 6;
 
   if (buyScore >= MIN_SCORE && buyScore > sellScore) {
     const indexConfirmation = getIndexConfirmation(symbol, 'BUY', allCandles);
