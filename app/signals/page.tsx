@@ -21,6 +21,7 @@ import {
   isMarketCloseSquareOffTimeIST,
   minutesSinceISO,
 } from '@/lib/marketHours';
+import { calculatePositionSizing } from '@/lib/positionSizing';
 
 type AISentiment = {
   label: 'positive' | 'negative' | 'neutral';
@@ -59,6 +60,8 @@ type TrackedSignal = TradeSignal & {
 
 const TRACKED_SIGNALS_KEY = 'tracked_signals_v1';
 const SIGNAL_EXPIRY_MINUTES = 20;
+const DEFAULT_MAX_RISK_PER_TRADE = 500;
+const DEFAULT_ESTIMATED_CHARGES = 50;
 
 function formatPrice(value: number) {
   if (!value) return '--';
@@ -67,6 +70,11 @@ function formatPrice(value: number) {
 
 function formatPercent(value: number) {
   return `${Math.round(value)}%`;
+}
+
+function formatMoneyValue(value: number) {
+  const sign = value < 0 ? '-' : '';
+  return `${sign}₹${Math.abs(value).toFixed(2)}`;
 }
 
 function createId() {
@@ -450,6 +458,193 @@ function NewsBox({ news }: { news: NewsItem[] }) {
   );
 }
 
+function PositionSizingBox({ signal }: { signal: TradeSignal }) {
+  if (signal.side !== 'BUY' && signal.side !== 'SELL') {
+    return null;
+  }
+
+  const sizing = calculatePositionSizing({
+    side: signal.side,
+    entry: signal.entry,
+    stopLoss: signal.stopLoss,
+    target: signal.target1,
+    maxRiskAmount: DEFAULT_MAX_RISK_PER_TRADE,
+    estimatedCharges: DEFAULT_ESTIMATED_CHARGES,
+  });
+
+  const qualityClass =
+    sizing.quality === 'GOOD'
+      ? 'text-green-400'
+      : sizing.quality === 'ACCEPTABLE'
+      ? 'text-yellow-300'
+      : sizing.quality === 'WEAK'
+      ? 'text-orange-300'
+      : 'text-red-400';
+
+  return (
+    <div className="mt-4 rounded-2xl border border-cyan-500/20 bg-cyan-500/10 p-4">
+      <div className="mb-3 flex items-center gap-2 text-cyan-300">
+        <Target className="h-4 w-4" />
+        <span className="text-sm font-semibold">
+          Position Size & Net R:R Assistant
+        </span>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 text-sm">
+        <div>
+          <p className="text-slate-500">Max Risk</p>
+          <p className="font-bold text-white">
+            {formatMoneyValue(DEFAULT_MAX_RISK_PER_TRADE)}
+          </p>
+        </div>
+
+        <div>
+          <p className="text-slate-500">Suggested Qty</p>
+          <p className="font-bold text-white">{sizing.suggestedQuantity}</p>
+        </div>
+
+        <div>
+          <p className="text-slate-500">Gross Target Profit</p>
+          <p className="font-bold text-green-400">
+            {formatMoneyValue(sizing.grossProfitAtTarget)}
+          </p>
+        </div>
+
+        <div>
+          <p className="text-slate-500">Gross SL Loss</p>
+          <p className="font-bold text-red-400">
+            {formatMoneyValue(sizing.grossLossAtStop)}
+          </p>
+        </div>
+
+        <div>
+          <p className="text-slate-500">Est. Charges</p>
+          <p className="font-bold text-yellow-300">
+            {formatMoneyValue(sizing.estimatedCharges)}
+          </p>
+        </div>
+
+        <div>
+          <p className="text-slate-500">Net R:R</p>
+          <p className={`font-bold ${qualityClass}`}>
+            1:{sizing.netRiskReward}
+          </p>
+        </div>
+
+        <div>
+          <p className="text-slate-500">Net Target Profit</p>
+          <p className="font-bold text-green-400">
+            {formatMoneyValue(sizing.netProfitAtTarget)}
+          </p>
+        </div>
+
+        <div>
+          <p className="text-slate-500">Net SL Loss</p>
+          <p className="font-bold text-red-400">
+            {formatMoneyValue(sizing.netLossAtStop)}
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-3 rounded-xl bg-black/20 p-3">
+        <p className={`text-sm font-bold ${qualityClass}`}>
+          Quality: {sizing.quality}
+        </p>
+
+        {sizing.warnings.length > 0 && (
+          <ul className="mt-2 space-y-1 text-xs text-yellow-200">
+            {sizing.warnings.slice(0, 3).map((warning, index) => (
+              <li key={index}>• {warning}</li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TradeExitAssistantBox({
+  signal,
+  currentPrice,
+  lifecycleStatus,
+}: {
+  signal: TradeSignal;
+  currentPrice: number;
+  lifecycleStatus?: SignalLifecycleStatus;
+}) {
+  if (signal.side !== 'BUY' && signal.side !== 'SELL') {
+    return null;
+  }
+
+  if (!currentPrice) {
+    return null;
+  }
+
+  const risk =
+    signal.riskPerShare ||
+    Math.abs(Number(signal.entry || 0) - Number(signal.stopLoss || 0));
+
+  if (!risk) {
+    return null;
+  }
+
+  const profitPerShare =
+    signal.side === 'BUY'
+      ? currentPrice - signal.entry
+      : signal.entry - currentPrice;
+
+  const currentR = profitPerShare / risk;
+
+  let message = 'Manage trade using stop loss, target, and manual exit rules.';
+  let messageClass = 'text-slate-300';
+
+  if (lifecycleStatus === 'WAITING') {
+    message = 'Entry not triggered yet. Do not enter if signal expires.';
+    messageClass = 'text-yellow-300';
+  } else if (lifecycleStatus === 'EXPIRED') {
+    message = 'Signal expired before entry. Avoid fresh entry.';
+    messageClass = 'text-red-300';
+  } else if (currentR < 0) {
+    message =
+      'Trade is below entry. Do not average. Respect SL or consider manual exit if setup weakens.';
+    messageClass = 'text-red-300';
+  } else if (currentR >= 1) {
+    message =
+      'Trade has reached 1R+ zone. Consider trailing SL or booking partial profit.';
+    messageClass = 'text-purple-300';
+  } else if (currentR >= 0.7) {
+    message =
+      'Trade has reached 0.7R zone. Consider moving SL near breakeven.';
+    messageClass = 'text-cyan-300';
+  }
+
+  return (
+    <div className="mt-4 rounded-2xl border border-orange-500/20 bg-orange-500/10 p-4">
+      <p className="text-sm font-semibold text-orange-300">
+        Trade Exit Assistant
+      </p>
+
+      <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+        <div>
+          <p className="text-slate-500">Current R</p>
+          <p className={currentR >= 0 ? 'font-bold text-green-400' : 'font-bold text-red-400'}>
+            {currentR.toFixed(2)}R
+          </p>
+        </div>
+
+        <div>
+          <p className="text-slate-500">Current P/L per share</p>
+          <p className={profitPerShare >= 0 ? 'font-bold text-green-400' : 'font-bold text-red-400'}>
+            {formatMoneyValue(profitPerShare)}
+          </p>
+        </div>
+      </div>
+
+      <p className={`mt-3 text-sm ${messageClass}`}>{message}</p>
+    </div>
+  );
+}
+
 function TrackingBox({
   status,
   currentPrice,
@@ -667,6 +862,16 @@ function SignalCard({
             </div>
           </div>
         </div>
+      )}
+
+      {!isNeutral && <PositionSizingBox signal={signal} />}
+
+      {!isNeutral && (
+        <TradeExitAssistantBox
+          signal={signal}
+          currentPrice={currentPrice || signal.entry}
+          lifecycleStatus={lifecycleStatus}
+        />
       )}
 
       <div className="mt-5">
