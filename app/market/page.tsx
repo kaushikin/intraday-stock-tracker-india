@@ -17,7 +17,7 @@ import {
   NATURAL_RESOURCES_SYMBOLS,
 } from '@/lib/instruments';
 import { generateSignalForStock } from '@/lib/signalEngine';
-import type { PriceData } from '@/contexts/AppContext';
+import type { CandleData, PriceData } from '@/contexts/AppContext';
 
 type MarketQuote = PriceData & {
   symbol: string;
@@ -71,6 +71,60 @@ function isNearLow(quote: MarketQuote) {
   if (range <= 0) return false;
 
   return quote.price <= quote.low + range * 0.2;
+}
+
+function getSignalCandidateSymbols(quotes: Record<string, MarketQuote>) {
+  const quoteList = Object.values(quotes).filter((quote) => {
+    return (
+      quote.exchange === 'NSE' &&
+      quote.price > 0 &&
+      Boolean(quote.open && quote.high && quote.low) &&
+      quote.symbol !== 'NIFTY' &&
+      quote.symbol !== 'BANKNIFTY'
+    );
+  });
+
+  const buyCandidates = quoteList
+    .filter((quote) => {
+      if (!quote.open || !quote.high || !quote.low) return false;
+
+      const range = quote.high - quote.low;
+      if (range <= 0) return false;
+
+      const positionInRange = (quote.price - quote.low) / range;
+
+      return (
+        quote.price > quote.open &&
+        quote.change > 0 &&
+        positionInRange >= 0.45
+      );
+    })
+    .sort((a, b) => b.change - a.change)
+    .slice(0, 6)
+    .map((quote) => quote.symbol);
+
+  const sellCandidates = quoteList
+    .filter((quote) => {
+      if (!quote.open || !quote.high || !quote.low) return false;
+
+      const range = quote.high - quote.low;
+      if (range <= 0) return false;
+
+      const positionInRange = (quote.price - quote.low) / range;
+
+      return (
+        quote.price < quote.open &&
+        quote.change < 0 &&
+        positionInRange <= 0.55
+      );
+    })
+    .sort((a, b) => a.change - b.change)
+    .slice(0, 6)
+    .map((quote) => quote.symbol);
+
+  return Array.from(
+    new Set([...buyCandidates, ...sellCandidates, 'NIFTY', 'BANKNIFTY'])
+  ).filter((symbol) => INSTRUMENTS[symbol]);
 }
 
 function MarketCard({ quote }: { quote: MarketQuote }) {
@@ -175,6 +229,7 @@ function Section({
 
 export default function MarketPage() {
   const [quotes, setQuotes] = useState<Record<string, MarketQuote>>({});
+  const [marketCandles, setMarketCandles] = useState<Record<string, CandleData[]>>({});
   const [loading, setLoading] = useState(false);
   const [scanMode, setScanMode] = useState<'WATCH' | 'NIFTY50' | 'ALL'>('NIFTY50');
   const [quoteErrors, setQuoteErrors] = useState<MarketQuoteError[]>([]);
@@ -249,6 +304,42 @@ export default function MarketPage() {
       });
 
       setQuotes(nextQuotes);
+
+      const signalCandidateSymbols =
+        scanMode === 'WATCH'
+          ? Array.from(new Set([...validSymbols, 'NIFTY', 'BANKNIFTY'])).filter(
+              (symbol) => INSTRUMENTS[symbol]
+            )
+          : getSignalCandidateSymbols(nextQuotes);
+
+      if (signalCandidateSymbols.length > 0) {
+        try {
+          const candleResponse = await fetch('/api/market/candles', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            cache: 'no-store',
+            body: JSON.stringify({
+              symbols: signalCandidateSymbols,
+              interval: 'FIVE_MINUTE',
+            }),
+          });
+
+          const candleData = await candleResponse.json();
+
+          if (candleResponse.ok && candleData.success) {
+            setMarketCandles((prev) => ({
+              ...prev,
+              ...(candleData.candles || {}),
+            }));
+          } else {
+            console.error('Market signal candle fetch failed:', candleData);
+          }
+        } catch (error) {
+          console.error('Market signal candle fetch error:', error);
+        }
+      }
     } catch (error: any) {
       console.error('Market overview fetch failed:', error);
 
@@ -261,7 +352,7 @@ export default function MarketPage() {
     } finally {
       setLoading(false);
     }
-  }, [symbolsToScan]);
+  }, [scanMode, symbolsToScan]);
 
   useEffect(() => {
     fetchMarketQuotes();
@@ -293,20 +384,39 @@ export default function MarketPage() {
 
   const signals = useMemo(() => {
     return quoteList.map((quote) =>
-      generateSignalForStock(quote.symbol, {
-        price: quote.price,
-        change: quote.change,
-        open: quote.open,
-        high: quote.high,
-        low: quote.low,
-        close: quote.close,
-        lastUpdated: quote.lastUpdated,
-      })
+      generateSignalForStock(
+        quote.symbol,
+        {
+          price: quote.price,
+          change: quote.change,
+          open: quote.open,
+          high: quote.high,
+          low: quote.low,
+          close: quote.close,
+          lastUpdated: quote.lastUpdated,
+        },
+        marketCandles[quote.symbol] || [],
+        marketCandles
+      )
     );
-  }, [quoteList]);
+  }, [quoteList, marketCandles]);
 
   const buySignals = signals.filter((signal) => signal.side === 'BUY').slice(0, 5);
   const sellSignals = signals.filter((signal) => signal.side === 'SELL').slice(0, 5);
+
+  const nearSignals = signals
+    .filter((signal) => signal.side === 'NEUTRAL')
+    .filter((signal) => {
+      return signal.reasons.some((reason) => {
+        return (
+          reason.includes('BUY score') ||
+          reason.includes('SELL score') ||
+          reason.includes('Waiting for enough') ||
+          reason.includes('No clean high-probability setup')
+        );
+      });
+    })
+    .slice(0, 8);
 
   return (
     <main className="min-h-screen bg-[#050608] px-5 pb-28 pt-8 text-white">
@@ -500,6 +610,48 @@ export default function MarketPage() {
             <div className="space-y-3">
               {nearLow.map((quote) => (
                 <CompactRow key={quote.symbol} quote={quote} />
+              ))}
+            </div>
+          )}
+        </Section>
+
+        <Section
+          title="Near Signal Setups"
+          subtitle="Diagnostics for symbols that did not qualify yet"
+          icon={<BarChart3 className="h-5 w-5" />}
+        >
+          {nearSignals.length === 0 ? (
+            <div className="rounded-3xl border border-slate-800 bg-[#15161b] p-6 text-slate-400">
+              No near setups to show right now.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {nearSignals.map((signal) => (
+                <div
+                  key={signal.symbol}
+                  className="rounded-3xl border border-slate-800 bg-[#15161b] p-5"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-xl font-bold text-white">
+                        {signal.symbol}
+                      </h3>
+                      <p className="mt-1 text-sm text-slate-400">
+                        {signal.status.replaceAll('_', ' ')}
+                      </p>
+                    </div>
+
+                    <span className="rounded-full bg-slate-700 px-3 py-1 text-sm font-bold text-slate-300">
+                      NO TRADE
+                    </span>
+                  </div>
+
+                  <ul className="mt-4 space-y-2 text-sm text-slate-400">
+                    {signal.reasons.slice(0, 6).map((reason, index) => (
+                      <li key={index}>• {reason}</li>
+                    ))}
+                  </ul>
+                </div>
               ))}
             </div>
           )}
