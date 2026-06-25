@@ -170,8 +170,18 @@ function calculateLifecycleStatus(
   }
 
   /**
-   * Only untriggered WAITING signals expire.
-   * Once entry is triggered, do not auto-expire the trade.
+   * Important:
+   * EXPIRED should only apply before entry is triggered.
+   * Once a trade is triggered, it must be managed by SL/targets/manual exit,
+   * not by signal expiry.
+   */
+  const wasTriggered =
+    signal.lifecycleStatus === 'TRIGGERED' ||
+    signal.lifecycleStatus === 'TARGET_1_HIT';
+
+  /**
+   * Only WAITING signals can expire.
+   * If entry was not triggered within expiry time, do not take the trade.
    */
   if (
     signal.lifecycleStatus === 'WAITING' &&
@@ -185,43 +195,28 @@ function calculateLifecycleStatus(
     return signal.lifecycleStatus;
   }
 
-  const risk =
-    signal.riskPerShare ||
-    Math.abs(Number(signal.entry || 0) - Number(signal.stopLoss || 0));
-
-  const breakevenR = risk * 0.7;
-  const trailR = risk * 1.0;
-
   if (signal.side === 'BUY') {
     if (currentPrice >= signal.target2) {
       return 'TARGET_2_HIT';
-    }
-
-    if (currentPrice <= signal.stopLoss) {
-      return 'STOP_LOSS_HIT';
     }
 
     if (currentPrice >= signal.target1) {
       return 'TARGET_1_HIT';
     }
 
-    if (signal.lifecycleStatus === 'TARGET_1_HIT') {
-      return 'TARGET_1_HIT';
-    }
-
-    if (isMarketCloseSquareOffTimeIST()) {
-      return 'TIME_EXIT_SUGGESTED';
-    }
-
-    if (risk > 0 && currentPrice >= signal.entry + trailR) {
-      return 'TRAIL_SL_SUGGESTED';
-    }
-
-    if (risk > 0 && currentPrice >= signal.entry + breakevenR) {
-      return 'BREAKEVEN_SUGGESTED';
+    if (currentPrice <= signal.stopLoss) {
+      return 'STOP_LOSS_HIT';
     }
 
     if (currentPrice >= signal.entry) {
+      return 'TRIGGERED';
+    }
+
+    /**
+     * If trade was already triggered and price comes back below entry,
+     * keep it as TRIGGERED until SL/target/manual exit.
+     */
+    if (wasTriggered) {
       return 'TRIGGERED';
     }
 
@@ -233,31 +228,23 @@ function calculateLifecycleStatus(
       return 'TARGET_2_HIT';
     }
 
-    if (currentPrice >= signal.stopLoss) {
-      return 'STOP_LOSS_HIT';
-    }
-
     if (currentPrice <= signal.target1) {
       return 'TARGET_1_HIT';
     }
 
-    if (signal.lifecycleStatus === 'TARGET_1_HIT') {
-      return 'TARGET_1_HIT';
-    }
-
-    if (isMarketCloseSquareOffTimeIST()) {
-      return 'TIME_EXIT_SUGGESTED';
-    }
-
-    if (risk > 0 && currentPrice <= signal.entry - trailR) {
-      return 'TRAIL_SL_SUGGESTED';
-    }
-
-    if (risk > 0 && currentPrice <= signal.entry - breakevenR) {
-      return 'BREAKEVEN_SUGGESTED';
+    if (currentPrice >= signal.stopLoss) {
+      return 'STOP_LOSS_HIT';
     }
 
     if (currentPrice <= signal.entry) {
+      return 'TRIGGERED';
+    }
+
+    /**
+     * If trade was already triggered and price comes back above entry,
+     * keep it as TRIGGERED until SL/target/manual exit.
+     */
+    if (wasTriggered) {
       return 'TRIGGERED';
     }
 
