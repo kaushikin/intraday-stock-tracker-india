@@ -38,9 +38,13 @@ type NewsItem = {
 type SignalLifecycleStatus =
   | 'WAITING'
   | 'TRIGGERED'
+  | 'BREAKEVEN_SUGGESTED'
+  | 'TRAIL_SL_SUGGESTED'
+  | 'TIME_EXIT_SUGGESTED'
   | 'TARGET_1_HIT'
   | 'TARGET_2_HIT'
   | 'STOP_LOSS_HIT'
+  | 'MANUAL_EXIT'
   | 'EXPIRED';
 
 type TrackedSignal = TradeSignal & {
@@ -77,6 +81,7 @@ function isTerminalStatus(status: SignalLifecycleStatus) {
   return (
     status === 'TARGET_2_HIT' ||
     status === 'STOP_LOSS_HIT' ||
+    status === 'MANUAL_EXIT' ||
     status === 'EXPIRED'
   );
 }
@@ -85,9 +90,13 @@ function getStatusLabel(status: SignalLifecycleStatus) {
   const labels: Record<SignalLifecycleStatus, string> = {
     WAITING: 'Waiting',
     TRIGGERED: 'Triggered',
+    BREAKEVEN_SUGGESTED: 'Move SL to Cost',
+    TRAIL_SL_SUGGESTED: 'Trail SL Suggested',
+    TIME_EXIT_SUGGESTED: 'Time Exit Suggested',
     TARGET_1_HIT: 'Target 1 Hit',
     TARGET_2_HIT: 'Target 2 Hit',
     STOP_LOSS_HIT: 'Stop Loss Hit',
+    MANUAL_EXIT: 'Manual Exit',
     EXPIRED: 'Expired',
   };
 
@@ -105,6 +114,21 @@ function getStatusClass(status: SignalLifecycleStatus) {
 
   if (status === 'TRIGGERED') {
     return 'bg-blue-500/15 text-blue-400 border-blue-500/30';
+  }
+
+  if (
+    status === 'BREAKEVEN_SUGGESTED' ||
+    status === 'TRAIL_SL_SUGGESTED'
+  ) {
+    return 'bg-purple-500/15 text-purple-300 border-purple-500/30';
+  }
+
+  if (status === 'TIME_EXIT_SUGGESTED') {
+    return 'bg-orange-500/15 text-orange-300 border-orange-500/30';
+  }
+
+  if (status === 'MANUAL_EXIT') {
+    return 'bg-slate-600 text-slate-200 border-slate-500';
   }
 
   if (status === 'WAITING') {
@@ -146,18 +170,13 @@ function calculateLifecycleStatus(
   }
 
   /**
-   * Expire non-completed intraday signals near market close.
-   */
-  if (isMarketCloseSquareOffTimeIST()) {
-    return 'EXPIRED';
-  }
-
-  /**
-   * If entry is not triggered within 20 minutes, setup is considered stale.
+   * Only untriggered WAITING signals expire.
+   * Once entry is triggered, do not auto-expire the trade.
    */
   if (
     signal.lifecycleStatus === 'WAITING' &&
-    minutesSinceISO(signal.createdAt) >= SIGNAL_EXPIRY_MINUTES
+    (minutesSinceISO(signal.createdAt) >= SIGNAL_EXPIRY_MINUTES ||
+      isMarketCloseSquareOffTimeIST())
   ) {
     return 'EXPIRED';
   }
@@ -166,17 +185,40 @@ function calculateLifecycleStatus(
     return signal.lifecycleStatus;
   }
 
+  const risk =
+    signal.riskPerShare ||
+    Math.abs(Number(signal.entry || 0) - Number(signal.stopLoss || 0));
+
+  const breakevenR = risk * 0.7;
+  const trailR = risk * 1.0;
+
   if (signal.side === 'BUY') {
     if (currentPrice >= signal.target2) {
       return 'TARGET_2_HIT';
+    }
+
+    if (currentPrice <= signal.stopLoss) {
+      return 'STOP_LOSS_HIT';
     }
 
     if (currentPrice >= signal.target1) {
       return 'TARGET_1_HIT';
     }
 
-    if (currentPrice <= signal.stopLoss) {
-      return 'STOP_LOSS_HIT';
+    if (signal.lifecycleStatus === 'TARGET_1_HIT') {
+      return 'TARGET_1_HIT';
+    }
+
+    if (isMarketCloseSquareOffTimeIST()) {
+      return 'TIME_EXIT_SUGGESTED';
+    }
+
+    if (risk > 0 && currentPrice >= signal.entry + trailR) {
+      return 'TRAIL_SL_SUGGESTED';
+    }
+
+    if (risk > 0 && currentPrice >= signal.entry + breakevenR) {
+      return 'BREAKEVEN_SUGGESTED';
     }
 
     if (currentPrice >= signal.entry) {
@@ -191,12 +233,28 @@ function calculateLifecycleStatus(
       return 'TARGET_2_HIT';
     }
 
+    if (currentPrice >= signal.stopLoss) {
+      return 'STOP_LOSS_HIT';
+    }
+
     if (currentPrice <= signal.target1) {
       return 'TARGET_1_HIT';
     }
 
-    if (currentPrice >= signal.stopLoss) {
-      return 'STOP_LOSS_HIT';
+    if (signal.lifecycleStatus === 'TARGET_1_HIT') {
+      return 'TARGET_1_HIT';
+    }
+
+    if (isMarketCloseSquareOffTimeIST()) {
+      return 'TIME_EXIT_SUGGESTED';
+    }
+
+    if (risk > 0 && currentPrice <= signal.entry - trailR) {
+      return 'TRAIL_SL_SUGGESTED';
+    }
+
+    if (risk > 0 && currentPrice <= signal.entry - breakevenR) {
+      return 'BREAKEVEN_SUGGESTED';
     }
 
     if (currentPrice <= signal.entry) {
@@ -460,8 +518,10 @@ function SignalCard({
   lastCheckedAt,
   onRemoveTracked,
   onSaveToJournal,
+  onManualExit,
   savedToJournal,
   canSaveToJournal,
+  canManualExit,
 }: {
   signal: TradeSignal;
   sentiment?: AISentiment;
@@ -474,8 +534,10 @@ function SignalCard({
   lastCheckedAt?: string;
   onRemoveTracked?: () => void;
   onSaveToJournal?: () => void;
+  onManualExit?: () => void;
   savedToJournal?: boolean;
   canSaveToJournal?: boolean;
+  canManualExit?: boolean;
 }) {
   const isBuy = signal.side === 'BUY';
   const isSell = signal.side === 'SELL';
@@ -658,6 +720,21 @@ function SignalCard({
         >
           <CheckCircle2 className="h-4 w-4" />
           {savedToJournal ? 'Saved to Journal' : 'Save to Journal'}
+        </button>
+      )}
+
+      {canManualExit && onManualExit && (
+        <button
+          onClick={onManualExit}
+          disabled={savedToJournal}
+          className={`mt-5 flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 font-semibold ${
+            savedToJournal
+              ? 'cursor-not-allowed bg-green-600/20 text-green-400'
+              : 'bg-orange-600 text-white'
+          }`}
+        >
+          <CheckCircle2 className="h-4 w-4" />
+          {savedToJournal ? 'Saved to Journal' : 'Save Manual Exit'}
         </button>
       )}
 
@@ -966,6 +1043,99 @@ export default function SignalsPage() {
     alert(`${signal.symbol} trade saved to journal.`);
   }
 
+  function canManualExitTrackedSignal(signal: TrackedSignal) {
+    return (
+      signal.side !== 'NEUTRAL' &&
+      signal.lifecycleStatus !== 'WAITING' &&
+      !isTerminalStatus(signal.lifecycleStatus)
+    );
+  }
+
+  function saveManualExitToJournal(signal: TrackedSignal) {
+    if (signal.savedToJournal) {
+      alert('This signal is already saved to the journal.');
+      return;
+    }
+
+    if (!canManualExitTrackedSignal(signal)) {
+      alert('Only triggered/open trades can be manually exited.');
+      return;
+    }
+
+    if (signal.side !== 'BUY' && signal.side !== 'SELL') {
+      alert('Only BUY or SELL signals can be saved.');
+      return;
+    }
+
+    const currentPrice = prices[signal.symbol]?.price || signal.entry;
+
+    const exitPriceText = window.prompt(
+      `Enter manual exit price for ${signal.symbol}`,
+      String(currentPrice || signal.entry)
+    );
+
+    if (exitPriceText === null) return;
+
+    const exitPrice = Number(exitPriceText);
+
+    if (!exitPrice || exitPrice <= 0) {
+      alert('Enter a valid exit price.');
+      return;
+    }
+
+    const quantityText = window.prompt(
+      `Enter quantity for ${signal.symbol}`,
+      '1'
+    );
+
+    if (quantityText === null) return;
+
+    const quantity = Number(quantityText);
+
+    if (!quantity || quantity <= 0) {
+      alert('Enter a valid quantity.');
+      return;
+    }
+
+    const brokerageText = window.prompt('Enter brokerage/charges', '0');
+
+    if (brokerageText === null) return;
+
+    const brokerage = Number(brokerageText || 0);
+
+    if (brokerage < 0) {
+      alert('Brokerage cannot be negative.');
+      return;
+    }
+
+    addTrade({
+      symbol: signal.symbol,
+      side: signal.side,
+      entryPrice: signal.entry,
+      exitPrice,
+      quantity,
+      brokerage,
+      stopLoss: signal.stopLoss,
+      target: signal.target1,
+      outcome: 'MANUAL_EXIT',
+    });
+
+    setTrackedSignals((prev) =>
+      prev.map((item) =>
+        item.id === signal.id
+          ? {
+              ...item,
+              lifecycleStatus: 'MANUAL_EXIT',
+              savedToJournal: true,
+              lastCheckedAt: new Date().toISOString(),
+            }
+          : item
+      )
+    );
+
+    alert(`${signal.symbol} manual exit saved to journal.`);
+  }
+
   function notifySignalStatusChange(signal: TrackedSignal) {
     const status = signal.lifecycleStatus;
 
@@ -976,6 +1146,33 @@ export default function SignalsPage() {
           2
         )}. Watch targets and stop loss.`,
         type: 'info',
+      });
+      return;
+    }
+
+    if (status === 'BREAKEVEN_SUGGESTED') {
+      addAlert({
+        title: `${signal.symbol} Move SL to Cost`,
+        message: `${signal.side} trade reached profit protection zone. Consider moving stop loss near entry.`,
+        type: 'info',
+      });
+      return;
+    }
+
+    if (status === 'TRAIL_SL_SUGGESTED') {
+      addAlert({
+        title: `${signal.symbol} Trail SL Suggested`,
+        message: `${signal.side} trade has moved in your favor. Consider trailing stop loss.`,
+        type: 'info',
+      });
+      return;
+    }
+
+    if (status === 'TIME_EXIT_SUGGESTED') {
+      addAlert({
+        title: `${signal.symbol} Time Exit Suggested`,
+        message: `Intraday time exit zone reached. Consider manual exit or tight trailing stop.`,
+        type: 'warning',
       });
       return;
     }
@@ -1033,6 +1230,9 @@ export default function SignalsPage() {
 
       if (
         signal.lifecycleStatus === 'TRIGGERED' ||
+        signal.lifecycleStatus === 'BREAKEVEN_SUGGESTED' ||
+        signal.lifecycleStatus === 'TRAIL_SL_SUGGESTED' ||
+        signal.lifecycleStatus === 'TIME_EXIT_SUGGESTED' ||
         signal.lifecycleStatus === 'TARGET_1_HIT' ||
         signal.lifecycleStatus === 'TARGET_2_HIT' ||
         signal.lifecycleStatus === 'STOP_LOSS_HIT'
@@ -1141,6 +1341,8 @@ export default function SignalsPage() {
                   canSaveToJournal={canSaveTrackedSignalToJournal(signal)}
                   savedToJournal={signal.savedToJournal}
                   onSaveToJournal={() => saveTrackedSignalToJournal(signal)}
+                  canManualExit={canManualExitTrackedSignal(signal)}
+                  onManualExit={() => saveManualExitToJournal(signal)}
                 />
               ))}
 
