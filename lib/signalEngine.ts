@@ -437,7 +437,7 @@ export function generateSignalForStock(
         symbol,
         [
           ...indexConfirmation.reasons,
-          `BUY score before index filter: ${buyScore}/10`,
+          `BUY score before index filter: ${buyScore}/12`,
         ],
         entryPrice
       );
@@ -457,7 +457,7 @@ export function generateSignalForStock(
         symbol,
         [
           ...indexConfirmation.reasons,
-          `SELL score before index filter: ${sellScore}/10`,
+          `SELL score before index filter: ${sellScore}/12`,
         ],
         entryPrice
       );
@@ -470,8 +470,8 @@ export function generateSignalForStock(
   }
 
   reasons.push('No clean high-probability setup');
-  reasons.push(`BUY score: ${buyScore}/10`);
-  reasons.push(`SELL score: ${sellScore}/10`);
+  reasons.push(`BUY score: ${buyScore}/12`);
+  reasons.push(`SELL score: ${sellScore}/12`);
   reasons.push(`RSI: ${round2(rsi)}`);
   reasons.push(`VWAP: ₹${round2(vwap)}`);
   reasons.push(`EMA20: ₹${round2(ema20)}`);
