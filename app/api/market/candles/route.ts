@@ -23,7 +23,7 @@ declare global {
   var angelCandleCache: Record<string, CandleCacheValue> | undefined;
 }
 
-const CANDLE_CACHE_TTL_MS = 2 * 60 * 1000;
+const CANDLE_CACHE_TTL_MS = 3 * 60 * 1000;
 const CANDLE_SYMBOL_DELAY_MS = 800;
 
 function sleep(ms: number) {
@@ -209,7 +209,7 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
-      const cacheKey = `${symbol}:${interval}:${fromdate}:${todate}`;
+      const cacheKey = `${symbol}:${interval}:${fromdate}`;
       const cached = global.angelCandleCache[cacheKey];
 
       if (cached && cached.expiresAt > Date.now()) {
@@ -235,10 +235,22 @@ export async function POST(req: NextRequest) {
           candles: normalizedCandles,
         };
       } catch (error: any) {
-        errors.push({
-          symbol,
-          error: error?.message || 'Failed to fetch candles',
-        });
+        const staleCached = global.angelCandleCache?.[cacheKey];
+
+        if (staleCached?.candles?.length) {
+          result[symbol] = staleCached.candles;
+
+          errors.push({
+            symbol,
+            warning: 'Using cached candles because Angel candle request failed',
+            error: error?.message || 'Failed to fetch candles',
+          });
+        } else {
+          errors.push({
+            symbol,
+            error: error?.message || 'Failed to fetch candles',
+          });
+        }
       }
 
       await sleep(CANDLE_SYMBOL_DELAY_MS);
