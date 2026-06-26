@@ -23,6 +23,104 @@ import {
 } from '@/lib/marketHours';
 import { calculatePositionSizing } from '@/lib/positionSizing';
 
+
+const NEWS_SENTIMENT_CLIENT_CACHE_TTL_MS = 10 * 60 * 1000;
+
+type CachedClientFetchPayload = {
+  body: string;
+  status: number;
+  statusText: string;
+  headers: [string, string][];
+};
+
+type CachedClientFetchEntry = {
+  expiresAt: number;
+  payload?: CachedClientFetchPayload;
+  promise?: Promise<CachedClientFetchPayload>;
+};
+
+const newsSentimentClientCache = new Map<string, CachedClientFetchEntry>();
+
+function buildCachedResponse(payload: CachedClientFetchPayload): Response {
+  const body = [204, 205, 304].includes(payload.status) ? null : payload.body;
+
+  return new Response(body, {
+    status: payload.status,
+    statusText: payload.statusText,
+    headers: payload.headers,
+  });
+}
+
+async function cachedClientFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const url =
+    typeof input === 'string'
+      ? input
+      : input instanceof URL
+        ? input.toString()
+        : input.url;
+
+  const method = (init?.method || 'GET').toUpperCase();
+  const shouldDedupe =
+    url.includes('/api/news') || url.includes('/api/hf/sentiment');
+
+  if (!shouldDedupe) {
+    return fetch(input, init);
+  }
+
+  const bodyKey =
+    typeof init?.body === 'string'
+      ? init.body
+      : init?.body
+        ? '[non-string-body]'
+        : '';
+
+  const cacheKey = `${method}:${url}:${bodyKey}`;
+  const now = Date.now();
+  const cached = newsSentimentClientCache.get(cacheKey);
+
+  if (cached && cached.expiresAt > now) {
+    if (cached.payload) {
+      return buildCachedResponse(cached.payload);
+    }
+
+    if (cached.promise) {
+      return buildCachedResponse(await cached.promise);
+    }
+  }
+
+  const promise = fetch(input, init)
+    .then(async (response) => {
+      const payload: CachedClientFetchPayload = {
+        body: await response.clone().text(),
+        status: response.status,
+        statusText: response.statusText,
+        headers: Array.from(response.headers.entries()),
+      };
+
+      if (response.ok) {
+        newsSentimentClientCache.set(cacheKey, {
+          expiresAt: Date.now() + NEWS_SENTIMENT_CLIENT_CACHE_TTL_MS,
+          payload,
+        });
+      } else {
+        newsSentimentClientCache.delete(cacheKey);
+      }
+
+      return payload;
+    })
+    .catch((error) => {
+      newsSentimentClientCache.delete(cacheKey);
+      throw error;
+    });
+
+  newsSentimentClientCache.set(cacheKey, {
+    expiresAt: now + NEWS_SENTIMENT_CLIENT_CACHE_TTL_MS,
+    promise,
+  });
+
+  return buildCachedResponse(await promise);
+}
+
 type AISentiment = {
   label: 'positive' | 'negative' | 'neutral';
   confidence: number;
@@ -1023,7 +1121,7 @@ export default function SignalsPage() {
 
   async function fetchNewsForSymbol(symbol: string): Promise<NewsItem[]> {
     try {
-      const response = await fetch(`/api/news?symbol=${symbol}`, {
+      const response = await cachedClientFetch(`/api/news?symbol=${symbol}`, {
         cache: 'no-store',
       });
 
@@ -1052,7 +1150,7 @@ export default function SignalsPage() {
         const stockNews = await fetchNewsForSymbol(signal.symbol);
         nextNewsBySymbol[signal.symbol] = stockNews;
 
-        const response = await fetch('/api/hf/sentiment', {
+        const response = await cachedClientFetch('/api/hf/sentiment', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
