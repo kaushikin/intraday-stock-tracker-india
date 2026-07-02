@@ -22,6 +22,10 @@ import {
   minutesSinceISO,
 } from '@/lib/marketHours';
 import { calculatePositionSizing } from '@/lib/positionSizing';
+import {
+  analyzeTargetExit,
+  getTargetExitActionLabel,
+} from '@/lib/targetExitAssistant';
 
 
 const NEWS_SENTIMENT_CLIENT_CACHE_TTL_MS = 10 * 60 * 1000;
@@ -670,6 +674,8 @@ function TradeExitAssistantBox({
   currentPrice: number;
   lifecycleStatus?: SignalLifecycleStatus;
 }) {
+  const { candles } = useApp();
+
   if (signal.side !== 'BUY' && signal.side !== 'SELL') {
     return null;
   }
@@ -693,6 +699,12 @@ function TradeExitAssistantBox({
 
   const currentR = profitPerShare / risk;
 
+  const targetExit = analyzeTargetExit({
+    signal,
+    currentPrice,
+    candles: candles[signal.symbol] || [],
+  });
+
   let message = 'Manage trade using stop loss, target, and manual exit rules.';
   let messageClass = 'text-slate-300';
 
@@ -706,6 +718,18 @@ function TradeExitAssistantBox({
     message =
       'Trade is below entry. Do not average. Respect SL or consider manual exit if setup weakens.';
     messageClass = 'text-red-300';
+  } else if (targetExit?.suggestedAction === 'EXIT_REMAINING') {
+    message =
+      'High reversal risk near/after Target 1. Consider exiting remaining quantity.';
+    messageClass = 'text-red-300';
+  } else if (targetExit?.suggestedAction === 'BOOK_PARTIAL') {
+    message =
+      'Price is near Target 1 with reversal risk. Consider booking partial profit.';
+    messageClass = 'text-yellow-300';
+  } else if (targetExit?.suggestedAction === 'TRAIL_SL') {
+    message =
+      'Target 1 is hit with continuation support. Trail SL and hold remaining only while trend holds.';
+    messageClass = 'text-purple-300';
   } else if (currentR >= 1) {
     message =
       'Trade has reached 1R+ zone. Consider trailing SL or booking partial profit.';
@@ -715,6 +739,31 @@ function TradeExitAssistantBox({
       'Trade has reached 0.7R zone. Consider moving SL near breakeven.';
     messageClass = 'text-cyan-300';
   }
+
+  const reversalClass =
+    targetExit?.reversalRisk === 'HIGH'
+      ? 'text-red-300'
+      : targetExit?.reversalRisk === 'MEDIUM'
+        ? 'text-yellow-300'
+        : 'text-green-300';
+
+  const confidenceClass =
+    targetExit?.holdToTarget2Confidence === 'HIGH'
+      ? 'text-green-300'
+      : targetExit?.holdToTarget2Confidence === 'MEDIUM'
+        ? 'text-yellow-300'
+        : 'text-red-300';
+
+  const actionClass =
+    targetExit?.suggestedAction === 'EXIT_REMAINING'
+      ? 'border-red-500/30 bg-red-500/15 text-red-200'
+      : targetExit?.suggestedAction === 'BOOK_PARTIAL'
+        ? 'border-yellow-500/30 bg-yellow-500/15 text-yellow-200'
+        : targetExit?.suggestedAction === 'TRAIL_SL'
+          ? 'border-purple-500/30 bg-purple-500/15 text-purple-200'
+          : targetExit?.suggestedAction === 'MOVE_SL_TO_COST'
+            ? 'border-cyan-500/30 bg-cyan-500/15 text-cyan-200'
+            : 'border-green-500/30 bg-green-500/15 text-green-200';
 
   return (
     <div className="mt-4 rounded-2xl border border-orange-500/20 bg-orange-500/10 p-4">
@@ -739,6 +788,56 @@ function TradeExitAssistantBox({
       </div>
 
       <p className={`mt-3 text-sm ${messageClass}`}>{message}</p>
+
+      {targetExit && (
+        <div className="mt-4 rounded-2xl border border-slate-700 bg-black/30 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-orange-200">
+                Target Exit Assistant
+              </p>
+              <p className="mt-1 text-xs text-slate-400">
+                Helps decide whether to book, trail, or hold for Target 2.
+              </p>
+            </div>
+
+            <span className={`rounded-full border px-3 py-1 text-xs font-bold ${actionClass}`}>
+              {getTargetExitActionLabel(targetExit.suggestedAction)}
+            </span>
+          </div>
+
+          <div className="mt-3 grid grid-cols-3 gap-3 text-sm">
+            <div>
+              <p className="text-slate-500">Progress to T1</p>
+              <p className="font-bold text-white">
+                {targetExit.targetProgressPercent.toFixed(0)}%
+              </p>
+            </div>
+
+            <div>
+              <p className="text-slate-500">Reversal Risk</p>
+              <p className={`font-bold ${reversalClass}`}>
+                {targetExit.reversalRisk}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-slate-500">Hold to T2</p>
+              <p className={`font-bold ${confidenceClass}`}>
+                {targetExit.holdToTarget2Confidence}
+              </p>
+            </div>
+          </div>
+
+          {targetExit.reasons.length > 0 && (
+            <ul className="mt-3 space-y-1 text-xs text-slate-300">
+              {targetExit.reasons.map((reason, index) => (
+                <li key={index}>• {reason}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   );
 }
