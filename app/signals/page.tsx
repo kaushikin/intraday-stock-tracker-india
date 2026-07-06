@@ -162,8 +162,17 @@ type TrackedSignal = TradeSignal & {
 
 const TRACKED_SIGNALS_KEY = 'tracked_signals_v1';
 const SIGNAL_EXPIRY_MINUTES = 20;
+import { evaluateTradeability } from '@/lib/tradeabilityGate';
+
+// Real risk you actually size and trade with — drives Suggested Qty,
+// Gross/Net Profit, and the Quality label shown to you.
 const DEFAULT_MAX_RISK_PER_TRADE = 500;
 const DEFAULT_ESTIMATED_CHARGES = 50;
+
+// Larger notional risk basis used ONLY to qualify tradeability (dilutes the
+// fixed charge drag so Net R:R reflects the setup, not a ₹500 sizing
+// artifact). This is never shown as a quantity or used for real sizing.
+const GATE_QUALIFICATION_MAX_RISK = 1200;
 
 function formatPrice(value: number) {
   if (!value) return '--';
@@ -652,6 +661,46 @@ function PositionSizingBox({ signal }: { signal: TradeSignal }) {
         <p className={`text-sm font-bold ${qualityClass}`}>
           Quality: {sizing.quality}
         </p>
+
+        {(() => {
+          const gateSizing = calculatePositionSizing({
+            side: signal.side,
+            entry: signal.entry,
+            stopLoss: signal.stopLoss,
+            target: signal.target1,
+            maxRiskAmount: GATE_QUALIFICATION_MAX_RISK,
+            estimatedCharges: DEFAULT_ESTIMATED_CHARGES,
+          });
+
+          const gate = evaluateTradeability({
+            quality: gateSizing.quality,
+            strength: signal.strength,
+            netRiskReward: gateSizing.netRiskReward,
+          });
+
+          const gateClass =
+            gate.status === 'TRADABLE'
+              ? 'border-green-500/40 bg-green-500/15 text-green-300'
+              : 'border-red-500/40 bg-red-500/15 text-red-300';
+
+          return (
+            <div className={`mt-3 rounded-lg border p-3 ${gateClass}`}>
+              <p className="text-sm font-bold">
+                {gate.status === 'TRADABLE'
+                  ? 'TRADABLE'
+                  : 'WATCH ONLY — DO NOT ENTER'}
+              </p>
+
+              {gate.reasons.length > 0 && (
+                <ul className="mt-2 space-y-1 text-xs">
+                  {gate.reasons.map((reason, index) => (
+                    <li key={index}>• {reason}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          );
+        })()}
 
         {sizing.warnings.length > 0 && (
           <ul className="mt-2 space-y-1 text-xs text-yellow-200">
