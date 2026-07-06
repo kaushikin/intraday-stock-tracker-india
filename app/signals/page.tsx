@@ -699,6 +699,22 @@ function TradeExitAssistantBox({
 
   const currentR = profitPerShare / risk;
 
+  const isStoppedOut = lifecycleStatus === 'STOP_LOSS_HIT';
+
+  // Once stopped out, freeze R/P&L to the realized outcome at the stop loss
+  // price instead of continuing to compute against live current price.
+  const realizedProfitPerShare =
+    signal.side === 'BUY'
+      ? signal.stopLoss - signal.entry
+      : signal.entry - signal.stopLoss;
+
+  const realizedR = risk ? realizedProfitPerShare / risk : -1;
+
+  const displayR = isStoppedOut ? realizedR : currentR;
+  const displayProfitPerShare = isStoppedOut
+    ? realizedProfitPerShare
+    : profitPerShare;
+
   const targetExit = analyzeTargetExit({
     signal,
     currentPrice,
@@ -713,6 +729,10 @@ function TradeExitAssistantBox({
     messageClass = 'text-yellow-300';
   } else if (lifecycleStatus === 'EXPIRED') {
     message = 'Signal expired before entry. Avoid fresh entry.';
+    messageClass = 'text-red-300';
+  } else if (isStoppedOut) {
+    message =
+      'Trade closed at stop loss. Do not average or re-enter without a fresh signal.';
     messageClass = 'text-red-300';
   } else if (currentR < 0) {
     message =
@@ -773,23 +793,27 @@ function TradeExitAssistantBox({
 
       <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
         <div>
-          <p className="text-slate-500">Current R</p>
-          <p className={currentR >= 0 ? 'font-bold text-green-400' : 'font-bold text-red-400'}>
-            {currentR.toFixed(2)}R
+          <p className="text-slate-500">
+            {isStoppedOut ? 'Realized R' : 'Current R'}
+          </p>
+          <p className={displayR >= 0 ? 'font-bold text-green-400' : 'font-bold text-red-400'}>
+            {displayR.toFixed(2)}R
           </p>
         </div>
 
         <div>
-          <p className="text-slate-500">Current P/L per share</p>
-          <p className={profitPerShare >= 0 ? 'font-bold text-green-400' : 'font-bold text-red-400'}>
-            {formatMoneyValue(profitPerShare)}
+          <p className="text-slate-500">
+            {isStoppedOut ? 'Realized P/L per share' : 'Current P/L per share'}
+          </p>
+          <p className={displayProfitPerShare >= 0 ? 'font-bold text-green-400' : 'font-bold text-red-400'}>
+            {formatMoneyValue(displayProfitPerShare)}
           </p>
         </div>
       </div>
 
       <p className={`mt-3 text-sm ${messageClass}`}>{message}</p>
 
-      {targetExit && (
+      {targetExit && !isStoppedOut && (
         <div className="mt-4 rounded-2xl border border-slate-700 bg-black/30 p-4">
           <div className="flex items-center justify-between gap-3">
             <div>
