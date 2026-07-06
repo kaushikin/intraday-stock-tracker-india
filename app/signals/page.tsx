@@ -163,6 +163,7 @@ type TrackedSignal = TradeSignal & {
 const TRACKED_SIGNALS_KEY = 'tracked_signals_v1';
 const SIGNAL_EXPIRY_MINUTES = 20;
 import { evaluateTradeability } from '@/lib/tradeabilityGate';
+import { getISTMinutes } from '@/lib/marketHours';
 
 // Real risk you actually size and trade with — drives Suggested Qty,
 // Gross/Net Profit, and the Quality label shown to you.
@@ -661,6 +662,25 @@ function PositionSizingBox({ signal }: { signal: TradeSignal }) {
         <p className={`text-sm font-bold ${qualityClass}`}>
           Quality: {sizing.quality}
         </p>
+
+        {(sizing.quality === 'WEAK' || sizing.quality === 'AVOID') && (
+          <div className="mt-2 rounded-lg bg-black/20 p-2 text-xs text-slate-400">
+            <p className="font-semibold text-slate-300">Why Watch Only:</p>
+            <ul className="mt-1 space-y-1">
+              <li>• Quality is {sizing.quality}</li>
+              <li>• Net R:R {sizing.netRiskReward} is in the {sizing.quality} range</li>
+              <li>
+                • Est. charges (₹{sizing.estimatedCharges}) reduce reward
+                significantly relative to target
+              </li>
+              {signal.reasons
+                .filter((r) => r.toLowerCase().includes('opposes'))
+                .map((r, index) => (
+                  <li key={index}>• {r}</li>
+                ))}
+            </ul>
+          </div>
+        )}
 
         {(() => {
           const gateSizing = calculatePositionSizing({
@@ -1234,6 +1254,49 @@ export default function SignalsPage() {
 
   const activeSignals = signals.filter((s) => s.side !== 'NEUTRAL');
   const neutralSignals = signals.filter((s) => s.side === 'NEUTRAL');
+
+  const noTradeDayInfo = (() => {
+    const evaluated = activeSignals.map((signal) => {
+      const gateSizing = calculatePositionSizing({
+        side: signal.side as 'BUY' | 'SELL',
+        entry: signal.entry,
+        stopLoss: signal.stopLoss,
+        target: signal.target1,
+        maxRiskAmount: GATE_QUALIFICATION_MAX_RISK,
+        estimatedCharges: DEFAULT_ESTIMATED_CHARGES,
+      });
+
+      return evaluateTradeability({
+        quality: gateSizing.quality,
+        strength: signal.strength,
+        netRiskReward: gateSizing.netRiskReward,
+      });
+    });
+
+    const total = evaluated.length;
+    const tradableCount = evaluated.filter((r) => r.status === 'TRADABLE').length;
+    const watchOnlyRatio = total > 0 ? (total - tradableCount) / total : 0;
+
+    const isBeforeMidMorning = getISTMinutes() < 10 * 60 + 45;
+    const mostlyWatchOnly = total > 0 && watchOnlyRatio >= 0.8;
+    const tooEarlyForCleanTrend = isBeforeMidMorning && tradableCount < 2;
+
+    let message = '';
+    if (mostlyWatchOnly) {
+      message =
+        'Most signals have poor Net R:R after charges. Avoid fresh entries; watch only.';
+    } else if (tooEarlyForCleanTrend) {
+      message =
+        'No clean trend yet. Fewer than 2 tradable signals so far this morning.';
+    }
+
+    return {
+      show: mostlyWatchOnly || tooEarlyForCleanTrend,
+      message,
+      tradableCount,
+      total,
+    };
+  })();
 
   const activeTrackedSignals = trackedSignals.filter(
     (signal) => !isTerminalStatus(signal.lifecycleStatus)
@@ -1827,6 +1890,19 @@ export default function SignalsPage() {
             </div>
           )}
         </section>
+
+        {noTradeDayInfo.show && (
+          <div className="mt-8 rounded-2xl border border-red-500/30 bg-red-500/10 p-4">
+            <p className="text-sm font-bold text-red-300">
+              Market Condition: WEAK TRADEABILITY / NO CLEAN TRADE
+            </p>
+            <p className="mt-1 text-sm text-red-200">{noTradeDayInfo.message}</p>
+            <p className="mt-1 text-xs text-red-300/70">
+              {noTradeDayInfo.tradableCount} of {noTradeDayInfo.total} active
+              signals are TRADABLE right now.
+            </p>
+          </div>
+        )}
 
         <section className="mt-8">
           <h2 className="mb-4 text-sm uppercase tracking-[0.25em] text-slate-500">
