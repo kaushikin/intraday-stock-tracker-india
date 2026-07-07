@@ -129,6 +129,7 @@ type AISentiment = {
   label: 'positive' | 'negative' | 'neutral';
   confidence: number;
   signalScore: number;
+  isFallback?: boolean;
 };
 
 type NewsItem = {
@@ -169,11 +170,6 @@ import { getISTMinutes } from '@/lib/marketHours';
 // Gross/Net Profit, and the Quality label shown to you.
 const DEFAULT_MAX_RISK_PER_TRADE = 500;
 const DEFAULT_ESTIMATED_CHARGES = 50;
-
-// Larger notional risk basis used ONLY to qualify tradeability (dilutes the
-// fixed charge drag so Net R:R reflects the setup, not a ₹500 sizing
-// artifact). This is never shown as a quantity or used for real sizing.
-const GATE_QUALIFICATION_MAX_RISK = 1200;
 
 function formatPrice(value: number) {
   if (!value) return '--';
@@ -375,26 +371,16 @@ function calculateLifecycleStatus(
 }
 
 function getFallbackSentiment(signal: TradeSignal): AISentiment {
-  if (signal.side === 'BUY') {
-    return {
-      label: 'positive',
-      confidence: 70,
-      signalScore: signal.strength === 'STRONG' ? 78 : 65,
-    };
-  }
-
-  if (signal.side === 'SELL') {
-    return {
-      label: 'negative',
-      confidence: 70,
-      signalScore: signal.strength === 'STRONG' ? 78 : 65,
-    };
-  }
-
+  // Hugging Face sentiment could not be reached or parsed. Do NOT fabricate
+  // a positive/negative reading by echoing the technical signal direction --
+  // that previously rendered as fake independent news corroboration and
+  // could mask genuinely bearish headlines. Report neutral + isFallback so
+  // the UI can flag this as "AI unavailable" instead of a real analysis.
   return {
     label: 'neutral',
-    confidence: 60,
-    signalScore: 45,
+    confidence: 0,
+    signalScore: calculateSignalScore(signal, 'neutral', 0),
+    isFallback: true,
   };
 }
 
@@ -486,6 +472,23 @@ function SentimentBox({
 
   if (!sentiment) {
     return null;
+  }
+
+  if (sentiment.isFallback) {
+    return (
+      <div className="mt-4 rounded-2xl border border-slate-500/30 bg-slate-500/10 p-4">
+        <div className="flex items-center gap-2 text-slate-400">
+          <Sparkles className="h-4 w-4" />
+          <span className="text-sm font-semibold">
+            AI analysis unavailable — showing technicals only
+          </span>
+        </div>
+        <p className="mt-1 text-xs text-slate-500">
+          Hugging Face sentiment could not be reached for this signal. Rely on
+          the news headlines below and price-action reasons directly.
+        </p>
+      </div>
+    );
   }
 
   const isPositive = sentiment.label === 'positive';
@@ -683,19 +686,16 @@ function PositionSizingBox({ signal }: { signal: TradeSignal }) {
         )}
 
         {(() => {
-          const gateSizing = calculatePositionSizing({
-            side: signal.side,
-            entry: signal.entry,
-            stopLoss: signal.stopLoss,
-            target: signal.target1,
-            maxRiskAmount: GATE_QUALIFICATION_MAX_RISK,
-            estimatedCharges: DEFAULT_ESTIMATED_CHARGES,
-          });
-
+          // Gate must evaluate the SAME real-money sizing shown to the user
+          // above (DEFAULT_MAX_RISK_PER_TRADE), not a hypothetical larger
+          // position. Using a bigger risk budget dilutes the fixed
+          // estimatedCharges and makes net R:R look better than it really
+          // is at real trade size, which was letting WEAK-quality, sub
+          // threshold setups render as TRADABLE. See bug report 2026-07-07.
           const gate = evaluateTradeability({
-            quality: gateSizing.quality,
+            quality: sizing.quality,
             strength: signal.strength,
-            netRiskReward: gateSizing.netRiskReward,
+            netRiskReward: sizing.netRiskReward,
           });
 
           const gateClass =
@@ -1257,19 +1257,21 @@ export default function SignalsPage() {
 
   const noTradeDayInfo = (() => {
     const evaluated = activeSignals.map((signal) => {
-      const gateSizing = calculatePositionSizing({
+      // Same fix as PositionSizingBox: evaluate tradeability at real
+      // DEFAULT_MAX_RISK_PER_TRADE sizing, not GATE_QUALIFICATION_MAX_RISK.
+      const realSizing = calculatePositionSizing({
         side: signal.side as 'BUY' | 'SELL',
         entry: signal.entry,
         stopLoss: signal.stopLoss,
         target: signal.target1,
-        maxRiskAmount: GATE_QUALIFICATION_MAX_RISK,
+        maxRiskAmount: DEFAULT_MAX_RISK_PER_TRADE,
         estimatedCharges: DEFAULT_ESTIMATED_CHARGES,
       });
 
       return evaluateTradeability({
-        quality: gateSizing.quality,
+        quality: realSizing.quality,
         strength: signal.strength,
-        netRiskReward: gateSizing.netRiskReward,
+        netRiskReward: realSizing.netRiskReward,
       });
     });
 
