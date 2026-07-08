@@ -191,7 +191,7 @@ function getIndexConfirmation(
   if (side === 'BUY') {
     if (niftyTrend === 'BEARISH') {
       return {
-        blocked: false,
+        blocked: true,
         scoreBoost: 0,
         reasons: ['No trade: NIFTY trend opposes BUY setup'],
       };
@@ -205,7 +205,7 @@ function getIndexConfirmation(
     if (needsBankNifty) {
       if (bankNiftyTrend === 'BEARISH') {
         return {
-          blocked: false,
+          blocked: true,
           scoreBoost: 0,
           reasons: ['No trade: BANKNIFTY trend opposes bank/finance BUY setup'],
         };
@@ -221,7 +221,7 @@ function getIndexConfirmation(
   if (side === 'SELL') {
     if (niftyTrend === 'BULLISH') {
       return {
-        blocked: false,
+        blocked: true,
         scoreBoost: 0,
         reasons: ['No trade: NIFTY trend opposes SELL setup'],
       };
@@ -235,7 +235,7 @@ function getIndexConfirmation(
     if (needsBankNifty) {
       if (bankNiftyTrend === 'BULLISH') {
         return {
-          blocked: false,
+          blocked: true,
           scoreBoost: 0,
           reasons: ['No trade: BANKNIFTY trend opposes bank/finance SELL setup'],
         };
