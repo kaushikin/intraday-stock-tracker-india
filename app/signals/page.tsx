@@ -1234,8 +1234,15 @@ function SignalCard({
 }
 
 export default function SignalsPage() {
-  const { watchlist, prices, candles, updatePrices, updateCandles, addTrade } =
-    useApp();
+  const {
+    watchlist,
+    prices,
+    candles,
+    candleWarnings,
+    updatePrices,
+    updateCandles,
+    addTrade,
+  } = useApp();
   const { addAlert, requestBrowserPermission, browserPermission } = useAlerts();
   const previousSignalStatusesRef = useRef<Record<string, string>>({});
 
@@ -1902,6 +1909,26 @@ export default function SignalsPage() {
             <p className="mt-1 text-xs text-red-300/70">
               {noTradeDayInfo.tradableCount} of {noTradeDayInfo.total} active
               signals are TRADABLE right now.
+            </p>
+          </div>
+        )}
+
+        {candleWarnings.length > 0 && (
+          <div className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4">
+            <p className="text-sm font-bold text-amber-300">
+              Candle Data Degraded for {candleWarnings.length}{' '}
+              {candleWarnings.length === 1 ? 'symbol' : 'symbols'}
+            </p>
+            <ul className="mt-1 space-y-0.5 text-xs text-amber-200/80">
+              {candleWarnings.slice(0, 8).map((w) => (
+                <li key={w.symbol}>
+                  {w.symbol}: {w.warning || w.error}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-1 text-xs text-amber-300/70">
+              Signals for these symbols may be based on stale or missing
+              candle data.
             </p>
           </div>
         )}

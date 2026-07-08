@@ -36,6 +36,12 @@ export interface CandleData {
   volume: number;
 }
 
+export interface CandleWarning {
+  symbol: string;
+  error?: string;
+  warning?: string;
+}
+
 export interface Trade {
   id: string;
   date: string;
@@ -62,6 +68,7 @@ interface AppContextType {
   watchlist: string[];
   prices: Record<string, PriceData>;
   candles: Record<string, CandleData[]>;
+  candleWarnings: CandleWarning[];
   trades: Trade[];
   dailyPL: number;
   tradeRuleSettings: TradeRuleSettings;
@@ -114,6 +121,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const [prices, setPrices] = useState<Record<string, PriceData>>(INITIAL_PRICES);
   const [candles, setCandles] = useState<Record<string, CandleData[]>>({});
+  const [candleWarnings, setCandleWarnings] = useState<CandleWarning[]>([]);
   const [trades, setTrades] = useState<Trade[]>([]);
   const [dailyPL, setDailyPL] = useState(0);
   const [isTargetReached, setIsTargetReached] = useState(false);
@@ -279,7 +287,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      setCandles(data.candles || {});
+      // Merge rather than replace: a symbol missing from this poll's
+      // response (fetch failed, no cache available yet) should keep its
+      // last known good candles instead of being wiped to empty, which
+      // would make the signal engine silently treat it as "not enough
+      // data" and skip a signal it otherwise could have generated.
+      setCandles((prev) => ({ ...prev, ...(data.candles || {}) }));
+      setCandleWarnings(data.errors || []);
     } catch (error) {
       console.error('Candle update failed:', error);
     }
@@ -399,6 +413,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         watchlist,
         prices,
         candles,
+        candleWarnings,
         trades,
         dailyPL,
         tradeRuleSettings,
