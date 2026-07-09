@@ -1,6 +1,10 @@
 export type TradeabilityStatus = 'TRADABLE' | 'WATCH_ONLY';
 
-export const MIN_TRADABLE_NET_RR = 1.15;
+// Was 1.15 -- mathematically unreachable under the current Target 1 =
+// risk x 1.3 formula (real ceiling is ~1.09). Moved to 1.04 to match the
+// new ACCEPTABLE quality floor in lib/positionSizing.ts. See bug report
+// 2026-07-10.
+export const MIN_TRADABLE_NET_RR = 1.04;
 
 export type TradeabilityInput = {
   quality: 'GOOD' | 'ACCEPTABLE' | 'WEAK' | 'AVOID';

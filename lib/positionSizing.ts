@@ -91,13 +91,23 @@ export function calculatePositionSizing(
     warnings.push('Net risk-reward after charges is below 1:1');
   }
 
+  // Thresholds recalibrated to the range that is actually achievable under
+  // the current Target 1 = risk x 1.3 formula. Simulating netRiskReward
+  // across realistic risk-per-share values shows a theoretical ceiling of
+  // ~1.0909 (as risk/share -> 0) and realistic outcomes clustering between
+  // ~1.04 (very high-price stocks with coarse quantity rounding, e.g.
+  // risk/share=200 -> 1.044) and ~1.09 (most normal-priced stocks, e.g.
+  // risk/share=6.44 -> 1.0893). The old thresholds (WEAK < 1.2,
+  // ACCEPTABLE < 1.5, GOOD >= 1.5) sat entirely above this ceiling, so
+  // every signal ever generated was permanently mislabeled WEAK regardless
+  // of technical quality. See bug report 2026-07-10.
   let quality: PositionSizingResult['quality'] = 'GOOD';
 
   if (netRiskReward < 1 || netProfitAtTarget <= 0) {
     quality = 'AVOID';
-  } else if (netRiskReward < 1.2) {
+  } else if (netRiskReward < 1.04) {
     quality = 'WEAK';
-  } else if (netRiskReward < 1.5) {
+  } else if (netRiskReward < 1.075) {
     quality = 'ACCEPTABLE';
   }
 
