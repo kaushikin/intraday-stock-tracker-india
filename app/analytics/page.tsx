@@ -58,6 +58,9 @@ type TrackedSignal = {
     confidence: number;
     signalScore: number;
   };
+  // Already persisted in localStorage (TrackedSignal extends TradeSignal,
+  // which has this field) -- just wasn't declared/read here before.
+  reasons?: string[];
 };
 
 const TRACKED_SIGNALS_KEY = 'tracked_signals_v1';
@@ -120,6 +123,62 @@ function getSignalStatusLabel(status: SignalLifecycleStatus) {
   };
 
   return labels[status];
+}
+
+// The 7 scoring factors from lib/signalEngine.ts. Each has a bullish (BUY)
+// and bearish (SELL) phrasing -- checking for either lets one definition
+// cover both sides of a signal.
+const FACTOR_DEFINITIONS: { key: string; label: string; phrases: string[] }[] = [
+  {
+    key: 'vwap',
+    label: 'Aligned with VWAP',
+    phrases: ['Price is above VWAP', 'Price is below VWAP'],
+  },
+  {
+    key: 'ema20',
+    label: 'Aligned with EMA 20',
+    phrases: ['Price is above EMA 20', 'Price is below EMA 20'],
+  },
+  {
+    key: 'emaStructure',
+    label: 'EMA 20/50 trend structure',
+    phrases: ['EMA 20 is above EMA 50', 'EMA 20 is below EMA 50'],
+  },
+  {
+    key: 'rsi',
+    label: 'RSI momentum confirmation',
+    phrases: ['RSI is healthy and rising', 'RSI is weak and falling'],
+  },
+  {
+    key: 'volume',
+    label: 'Volume above average',
+    phrases: ['Volume is above average'],
+  },
+  {
+    key: 'candleBody',
+    label: 'Strong candle body',
+    phrases: [
+      'Latest candle has bullish body strength',
+      'Latest candle has bearish body strength',
+    ],
+  },
+  {
+    key: 'positionInRange',
+    label: 'Not at extreme of day range',
+    phrases: [
+      'Price is strong but not at extreme day high',
+      'Price is weak but not at extreme day low',
+    ],
+  },
+];
+
+function getTechnicalScore(signal: TrackedSignal): number | null {
+  const scoreLine = (signal.reasons || []).find((r) =>
+    /score:\s*\d+\/12/i.test(r)
+  );
+  if (!scoreLine) return null;
+  const match = scoreLine.match(/(\d+)\/12/);
+  return match ? Number(match[1]) : null;
 }
 
 function MetricCard({
@@ -544,6 +603,80 @@ export default function AnalyticsPage() {
     };
   }, [trackedSignals]);
 
+  const factorAnalytics = useMemo(() => {
+    // Same convention as signalAnalytics.targetHitRate: only signals that
+    // actually resolved (target or stop-loss hit) count toward win rate.
+    // EXPIRED/active signals are excluded as inconclusive.
+    const completed = trackedSignals.filter(
+      (signal) =>
+        (signal.side === 'BUY' || signal.side === 'SELL') &&
+        (isTargetHit(signal.lifecycleStatus) ||
+          isStopLossHit(signal.lifecycleStatus))
+    );
+
+    const factorRows = FACTOR_DEFINITIONS.map((factor) => {
+      const withFactor = completed.filter((signal) =>
+        factor.phrases.some((phrase) =>
+          (signal.reasons || []).includes(phrase)
+        )
+      );
+      const withoutFactor = completed.filter(
+        (signal) =>
+          !factor.phrases.some((phrase) =>
+            (signal.reasons || []).includes(phrase)
+          )
+      );
+
+      const withWins = withFactor.filter((s) =>
+        isTargetHit(s.lifecycleStatus)
+      ).length;
+      const withoutWins = withoutFactor.filter((s) =>
+        isTargetHit(s.lifecycleStatus)
+      ).length;
+
+      return {
+        key: factor.key,
+        label: factor.label,
+        withCount: withFactor.length,
+        withWinRate:
+          withFactor.length > 0 ? (withWins / withFactor.length) * 100 : 0,
+        withoutCount: withoutFactor.length,
+        withoutWinRate:
+          withoutFactor.length > 0
+            ? (withoutWins / withoutFactor.length) * 100
+            : 0,
+      };
+    });
+
+    const scoreBuckets = [
+      { label: '6-7 (borderline)', min: 6, max: 7 },
+      { label: '8-9 (STRONG)', min: 8, max: 9 },
+      { label: '10-12 (STRONG + index boost)', min: 10, max: 12 },
+    ];
+
+    const scoreRows = scoreBuckets.map((bucket) => {
+      const inBucket = completed.filter((signal) => {
+        const score = getTechnicalScore(signal);
+        return score !== null && score >= bucket.min && score <= bucket.max;
+      });
+      const wins = inBucket.filter((s) =>
+        isTargetHit(s.lifecycleStatus)
+      ).length;
+
+      return {
+        label: bucket.label,
+        count: inBucket.length,
+        winRate: inBucket.length > 0 ? (wins / inBucket.length) * 100 : 0,
+      };
+    });
+
+    return {
+      totalCompleted: completed.length,
+      factorRows,
+      scoreRows,
+    };
+  }, [trackedSignals]);
+
   const netTone = tradeAnalytics.netPL >= 0 ? 'green' : 'red';
   const todayTone = tradeAnalytics.dailyPL >= 0 ? 'green' : 'red';
 
@@ -859,6 +992,95 @@ export default function AnalyticsPage() {
             </>
           )}
         </section>
+
+        {factorAnalytics.totalCompleted > 0 && (
+          <section className="mt-10">
+            <SectionTitle title="Signal Factor Win Rate (Beta)" />
+            <p className="mb-4 text-sm text-slate-500">
+              Based on {factorAnalytics.totalCompleted} completed signals
+              (target hit or stop-loss hit). Small sample sizes early on --
+              treat as directional, not conclusive, until this grows.
+            </p>
+
+            <div className="space-y-3">
+              {factorAnalytics.factorRows.map((row) => (
+                <div
+                  key={row.key}
+                  className="rounded-3xl border border-slate-800 bg-[#15161b] p-5"
+                >
+                  <h3 className="text-base font-bold text-white">
+                    {row.label}
+                  </h3>
+                  <div className="mt-3 grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-sm text-slate-500">
+                        Present ({row.withCount})
+                      </p>
+                      <p
+                        className={`mt-1 text-xl font-bold ${
+                          row.withWinRate >= 60
+                            ? 'text-green-400'
+                            : row.withWinRate >= 40
+                            ? 'text-yellow-400'
+                            : 'text-red-400'
+                        }`}
+                      >
+                        {row.withCount > 0
+                          ? formatPercent(row.withWinRate)
+                          : '--'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-slate-500">
+                        Absent ({row.withoutCount})
+                      </p>
+                      <p
+                        className={`mt-1 text-xl font-bold ${
+                          row.withoutWinRate >= 60
+                            ? 'text-green-400'
+                            : row.withoutWinRate >= 40
+                            ? 'text-yellow-400'
+                            : 'text-red-400'
+                        }`}
+                      >
+                        {row.withoutCount > 0
+                          ? formatPercent(row.withoutWinRate)
+                          : '--'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <h3 className="mb-3 mt-8 text-sm uppercase tracking-[0.25em] text-slate-500">
+              Win Rate by Technical Score
+            </h3>
+            <div className="space-y-3">
+              {factorAnalytics.scoreRows.map((row) => (
+                <div
+                  key={row.label}
+                  className="flex items-center justify-between rounded-3xl border border-slate-800 bg-[#15161b] p-5"
+                >
+                  <p className="text-sm text-slate-400">
+                    {row.label} ({row.count})
+                  </p>
+                  <p
+                    className={`text-xl font-bold ${
+                      row.winRate >= 60
+                        ? 'text-green-400'
+                        : row.winRate >= 40
+                        ? 'text-yellow-400'
+                        : 'text-red-400'
+                    }`}
+                  >
+                    {row.count > 0 ? formatPercent(row.winRate) : '--'}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         {signalAnalytics.symbolAccuracy.length > 0 && (
           <section className="mt-10">
