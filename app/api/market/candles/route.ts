@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAngelCandleData } from '@/lib/angel';
+import { getYfinanceCandleData } from '@/lib/yfinanceCandles';
+// Angel One candle API replaced with yfinance (free, no auth, no session mgmt)
 import { INSTRUMENTS } from '@/lib/instruments';
 
 export const dynamic = 'force-dynamic';
@@ -218,15 +219,21 @@ export async function POST(req: NextRequest) {
       }
 
       try {
-        const angelResponse = await getAngelCandleData({
-          exchange: instrument.exchange,
-          symboltoken: instrument.token,
-          interval,
-          fromdate,
-          todate,
-        });
+        // yfinance fetch: interval is in minutes (1, 5, 15, etc.)
+        // Calculate days back from fromdate/todate if provided, else default to 7
+        const intervalMinutes =
+          interval === '1minute' ? 1
+          : interval === '5minute' ? 5
+          : interval === '15minute' ? 15
+          : interval === '30minute' ? 30
+          : interval === '60minute' ? 60
+          : 1440; // default to 1day
 
-        const normalizedCandles = normalizeAngelCandles(angelResponse?.data || []);
+        const normalizedCandles = await getYfinanceCandleData(
+          instrument.symbol,
+          intervalMinutes,
+          7 // fetch last 7 days (yfinance 1m data only available for 7d)
+        );
 
         result[symbol] = normalizedCandles;
 

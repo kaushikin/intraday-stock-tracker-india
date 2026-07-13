@@ -16,7 +16,8 @@
     "openai": "^4.47.1",
     "react": "^18",
     "react-dom": "^18",
-    "speakeasy": "^2.0.0"
+    "speakeasy": "^2.0.0",
+    "yahoo-finance2": "^3.11.0"
   },
   "devDependencies": {
     "@types/node": "^20",

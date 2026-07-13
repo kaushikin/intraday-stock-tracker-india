@@ -88,10 +88,20 @@ export default function SettingsPage() {
   );
 
   const [savedMessage, setSavedMessage] = useState('');
+  const [candleSource, setCandleSource] = useState<'angel' | 'yfinance'>('angel');
 
   useEffect(() => {
     setSettings(loadTradeRuleSettings());
+    const saved = localStorage.getItem('candleDataSource');
+    if (saved === 'angel' || saved === 'yfinance') {
+      setCandleSource(saved);
+    }
   }, []);
+
+  const handleCandleSourceChange = (source: 'angel' | 'yfinance') => {
+    setCandleSource(source);
+    localStorage.setItem('candleDataSource', source);
+  };
 
   const status = useMemo(() => {
     return evaluateTradeRules(trades, settings);
@@ -332,6 +342,51 @@ export default function SettingsPage() {
             </div>
           </div>
         </section>
+        <section className="mt-8 rounded-3xl border border-slate-800 bg-[#15161b] p-5">
+          <div className="flex items-start gap-3">
+            <Settings className="h-6 w-6 text-blue-400" />
+
+            <div className="w-full">
+              <h3 className="font-bold text-white">Candle Data Source</h3>
+
+              <p className="mt-1 text-sm text-slate-500">
+                Switch between Angel One (real-time, session management) and
+                yfinance (free, no auth, 15-min delay). Fallback is automatic
+                if primary source fails.
+              </p>
+
+              <div className="mt-4 flex gap-3">
+                <button
+                  onClick={() => handleCandleSourceChange('angel')}
+                  className={`flex-1 rounded-2xl px-4 py-3 font-semibold transition ${
+                    candleSource === 'angel'
+                      ? 'bg-blue-600 text-white'
+                      : 'border border-slate-700 text-slate-400 hover:border-slate-600'
+                  }`}
+                >
+                  Angel One
+                </button>
+
+                <button
+                  onClick={() => handleCandleSourceChange('yfinance')}
+                  className={`flex-1 rounded-2xl px-4 py-3 font-semibold transition ${
+                    candleSource === 'yfinance'
+                      ? 'bg-green-600 text-white'
+                      : 'border border-slate-700 text-slate-400 hover:border-slate-600'
+                  }`}
+                >
+                  yfinance (Beta)
+                </button>
+              </div>
+
+              <div className="mt-3 rounded-2xl bg-black/30 p-3 text-xs text-slate-400">
+                Current: <span className="font-bold">{candleSource}</span> · Auto-fallback
+                enabled
+              </div>
+            </div>
+          </div>
+        </section>
+
       </div>
     </main>
   );
