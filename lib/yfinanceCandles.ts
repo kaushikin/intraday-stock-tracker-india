@@ -1,5 +1,31 @@
 import { CandleData } from '@/contexts/AppContext';
 
+function toYahooFinanceSymbol(symbol: string): string {
+  const normalized = symbol.trim().toUpperCase();
+
+  const indexMap: Record<string, string> = {
+    NIFTY: '^NSEI',
+    NIFTY50: '^NSEI',
+    BANKNIFTY: '^NSEBANK',
+    NIFTYBANK: '^NSEBANK',
+  };
+
+  if (indexMap[normalized]) {
+    return indexMap[normalized];
+  }
+
+  if (
+    normalized.startsWith('^') ||
+    normalized.endsWith('.NS') ||
+    normalized.endsWith('.BO')
+  ) {
+    return normalized;
+  }
+
+  return `${normalized}.NS`;
+}
+
+
 /**
  * Fetch candles from Yahoo Finance via yahoo-finance2
  * No authentication required, 15-min delay (acceptable for signals)
@@ -30,6 +56,8 @@ export async function getYfinanceCandleData(
       );
     }
 
+    const yahooSymbol = toYahooFinanceSymbol(symbol);
+
     // Map interval minutes to yahoo-finance2 format
     const intervalMap: Record<
       number,
@@ -47,7 +75,7 @@ export async function getYfinanceCandleData(
       intervalMap[interval] || '1d';
 
     // Fetch historical data
-    const result = await yahooFinance.chart(symbol, {
+    const result = await yahooFinance.chart(yahooSymbol, {
       interval: yInterval,
       period1: new Date(Date.now() - days * 24 * 60 * 60 * 1000),
     });
