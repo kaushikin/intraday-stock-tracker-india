@@ -41,3 +41,4 @@ next-env.d.ts
 scripmaster.json
 
 .env.local.save
+patch_fix_*.py
