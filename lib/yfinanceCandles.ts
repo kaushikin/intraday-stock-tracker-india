@@ -10,13 +10,23 @@ export async function getYfinanceCandleData(
   days: number = 7
 ): Promise<CandleData[]> {
   try {
-    // Dynamically require yahoo-finance2 (may not be installed yet)
+    // Dynamically require yahoo-finance2 and initialize v3 client
     let yahooFinance;
     try {
-      yahooFinance = require('yahoo-finance2').default;
+      const yfModule = require('yahoo-finance2');
+      const YahooFinance =
+        yfModule.YahooFinance ||
+        yfModule.default?.YahooFinance ||
+        yfModule.default;
+
+      if (typeof YahooFinance !== 'function') {
+        throw new Error('YahooFinance constructor not found');
+      }
+
+      yahooFinance = new YahooFinance();
     } catch {
       throw new Error(
-        'yahoo-finance2 not installed. Run: npm install yahoo-finance2'
+        'yahoo-finance2 not installed or failed to initialize. Run: npm install yahoo-finance2'
       );
     }
 
