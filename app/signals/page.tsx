@@ -130,6 +130,7 @@ type AISentiment = {
   confidence: number;
   signalScore: number;
   isFallback?: boolean;
+  sentimentError?: string;
 };
 
 type NewsItem = {
@@ -370,17 +371,19 @@ function calculateLifecycleStatus(
   return 'WAITING';
 }
 
-function getFallbackSentiment(signal: TradeSignal): AISentiment {
+function getFallbackSentiment(signal: TradeSignal, error?: string): AISentiment {
   // Hugging Face sentiment could not be reached or parsed. Do NOT fabricate
   // a positive/negative reading by echoing the technical signal direction --
   // that previously rendered as fake independent news corroboration and
   // could mask genuinely bearish headlines. Report neutral + isFallback so
   // the UI can flag this as "AI unavailable" instead of a real analysis.
+  // If an error is provided, include it so the UI can show diagnostics.
   return {
     label: 'neutral',
     confidence: 0,
     signalScore: calculateSignalScore(signal, 'neutral', 0),
     isFallback: true,
+    sentimentError: error,
   };
 }
 
@@ -475,6 +478,26 @@ function SentimentBox({
   }
 
   if (sentiment.isFallback) {
+    let errorExplanation = 'Hugging Face sentiment could not be reached.';
+    if (sentiment.sentimentError) {
+      if (sentiment.sentimentError.includes('HUGGINGFACE_API_KEY')) {
+        errorExplanation =
+          'Hugging Face API key not configured. Set HUGGINGFACE_API_KEY in .env.local to enable sentiment analysis.';
+      } else if (
+        sentiment.sentimentError.includes('rate') ||
+        sentiment.sentimentError.includes('429') ||
+        sentiment.sentimentError.includes('503')
+      ) {
+        errorExplanation =
+          'Hugging Face is rate-limited or temporarily unavailable. Sentiment analysis will resume when service recovers.';
+      } else if (sentiment.sentimentError.includes('non-JSON')) {
+        errorExplanation =
+          'Hugging Face returned an invalid response. This may indicate a service issue.';
+      } else {
+        errorExplanation = `Sentiment error: ${sentiment.sentimentError}`;
+      }
+    }
+
     return (
       <div className="mt-4 rounded-2xl border border-slate-500/30 bg-slate-500/10 p-4">
         <div className="flex items-center gap-2 text-slate-400">
@@ -483,9 +506,9 @@ function SentimentBox({
             AI analysis unavailable — showing technicals only
           </span>
         </div>
+        <p className="mt-1 text-xs text-slate-500">{errorExplanation}</p>
         <p className="mt-1 text-xs text-slate-500">
-          Hugging Face sentiment could not be reached for this signal. Rely on
-          the news headlines below and price-action reasons directly.
+          Rely on the news headlines below and price-action reasons directly.
         </p>
       </div>
     );
@@ -1407,7 +1430,13 @@ export default function SignalsPage() {
         const data = await response.json();
 
         if (!response.ok || !data.success) {
-          nextSentiments[signal.symbol] = getFallbackSentiment(signal);
+          // Capture the actual error so we can show diagnostics.
+          const errorMsg = data.error || 'Unknown error';
+          console.warn(
+            `[HF Sentiment] ${signal.symbol}: ${errorMsg}`,
+            data.details || ''
+          );
+          nextSentiments[signal.symbol] = getFallbackSentiment(signal, errorMsg);
           continue;
         }
 
@@ -1430,9 +1459,11 @@ export default function SignalsPage() {
           confidence,
           signalScore: calculateSignalScore(signal, label, confidence),
         };
-      } catch {
+      } catch (error: any) {
+        const errorMsg = error?.message || 'Network or unknown error';
+        console.warn(`[HF Sentiment] ${signal.symbol}: ${errorMsg}`);
         nextNewsBySymbol[signal.symbol] = [];
-        nextSentiments[signal.symbol] = getFallbackSentiment(signal);
+        nextSentiments[signal.symbol] = getFallbackSentiment(signal, errorMsg);
       }
     }
 
