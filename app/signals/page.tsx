@@ -166,6 +166,7 @@ const TRACKED_SIGNALS_KEY = 'tracked_signals_v1';
 const SIGNAL_EXPIRY_MINUTES = 20;
 import { evaluateTradeability } from '@/lib/tradeabilityGate';
 import { getISTMinutes } from '@/lib/marketHours';
+import { analyzeMarketCondition, type MarketCondition } from "@/lib/marketCondition";
 
 // Real risk you actually size and trade with — drives Suggested Qty,
 // Gross/Net Profit, and the Quality label shown to you.
@@ -1816,6 +1817,8 @@ export default function SignalsPage() {
     analyzeSentiments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signals.length]);
+  const [marketCondition, setMarketCondition] = useState<MarketCondition | null>(null);
+
 
   return (
     <main className="min-h-screen bg-[#050608] px-5 pb-28 pt-8 text-white">
@@ -1941,6 +1944,42 @@ export default function SignalsPage() {
               {noTradeDayInfo.tradableCount} of {noTradeDayInfo.total} active
               signals are TRADABLE right now.
             </p>
+          </div>
+        )}
+
+        {marketCondition && (
+          <div className={`mt-4 rounded-2xl border p-4 ${
+            marketCondition.regime === 'favorable'
+              ? 'border-green-500/30 bg-green-500/10'
+              : marketCondition.regime === 'caution'
+              ? 'border-amber-500/30 bg-amber-500/10'
+              : 'border-red-500/30 bg-red-500/10'
+          }`}>
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-sm font-bold text-slate-200">Market Condition</p>
+                <p className={`mt-1 inline-block rounded-full px-3 py-1 text-xs font-semibold ${
+                  marketCondition.regime === 'favorable'
+                    ? 'bg-green-600 text-white'
+                    : marketCondition.regime === 'caution'
+                    ? 'bg-amber-600 text-white'
+                    : 'bg-red-600 text-white'
+                }`}>
+                  {marketCondition.regime === 'favorable' ? '✅ Favorable' : marketCondition.regime === 'caution' ? '⚠️ Caution' : '❌ Choppy'}
+                </p>
+              </div>
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              <div>
+                <p className="text-xs text-slate-500">Volatility (ATR)</p>
+                <p className="mt-1 font-bold text-slate-200">{marketCondition.volatility.toUpperCase()} ({marketCondition.atrPercent.toFixed(2)}%)</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Trend Strength (ADX)</p>
+                <p className="mt-1 font-bold text-slate-200">{marketCondition.trendStrength.toUpperCase()} ({marketCondition.adxValue.toFixed(1)})</p>
+              </div>
+            </div>
+            <p className="mt-3 text-xs text-slate-400">{marketCondition.recommendation}</p>
           </div>
         )}
 
