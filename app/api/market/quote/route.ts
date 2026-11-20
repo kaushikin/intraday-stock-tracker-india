@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAngelMarketData } from '@/lib/angel';
+import { exchangeTimestamp } from '@/lib/marketDataQuality';
+import { getCashInstruments } from '@/lib/cashInstruments';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,6 +11,8 @@ type QuoteRequestItem = {
   symbol: string;
   exchange: Exchange;
   token: string;
+  tickSize?: number;
+  asOf?: string;
 };
 
 const MAX_TOKENS_PER_REQUEST = 15;
@@ -39,12 +43,16 @@ function normalizeItems(input: unknown): QuoteRequestItem[] {
 
   return input
     .map((item: any) => ({
-      symbol: String(item?.symbol || '').trim().toUpperCase(),
+      symbol: String(item?.symbol || '')
+        .trim()
+        .toUpperCase(),
       exchange: item?.exchange,
       token: String(item?.token || '').trim(),
     }))
     .filter((item) => {
-      return Boolean(item.symbol && item.token && isValidExchange(item.exchange));
+      return Boolean(
+        item.symbol && item.token && isValidExchange(item.exchange)
+      );
     });
 }
 
@@ -87,7 +95,14 @@ function buildQuotesFromAngelResponse(
       high: Number(q.high || 0),
       low: Number(q.low || 0),
       close: Number(q.close || 0),
+      tickSize: original?.tickSize,
+      instrumentAsOf: original?.asOf,
       lastUpdated: new Date().toISOString(),
+      exchangeTime: exchangeTimestamp(q.exchFeedTime),
+      tradeTime: exchangeTimestamp(q.exchTradeTime),
+      bid: Number(q.depth?.buy?.[0]?.price || 0),
+      ask: Number(q.depth?.sell?.[0]?.price || 0),
+      askQuantity: Number(q.depth?.sell?.[0]?.quantity || 0),
     };
   });
 }
@@ -119,7 +134,15 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
 
     const normalizedItems = normalizeItems(body.items);
-    const items = dedupeItems(normalizedItems);
+    if (normalizedItems.length > 20)
+      return NextResponse.json(
+        { success: false, error: 'At most 20 symbols per request.' },
+        { status: 400 }
+      );
+    const instruments = await getCashInstruments();
+    const items = dedupeItems(normalizedItems).flatMap((item) =>
+      instruments[item.symbol] ? [instruments[item.symbol]] : []
+    );
 
     if (!items.length) {
       return NextResponse.json(

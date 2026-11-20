@@ -1,6 +1,12 @@
-import { CandleData, PriceData } from '@/contexts/AppContext';
+import type { CandleData, PriceData } from '@/contexts/AppContext';
 import { isFreshSignalWindowOpenIST } from '@/lib/marketHours';
 import { addIndicators } from '@/lib/technicalIndicators';
+import {
+  completedCandles,
+  candleProblem,
+  quoteProblem,
+} from '@/lib/marketDataQuality';
+import { istDateKey } from '@/lib/marketHours';
 
 export type SignalSide = 'BUY' | 'SELL' | 'NEUTRAL';
 
@@ -108,7 +114,6 @@ function createSellSignal(
   };
 }
 
-
 type IndexTrend = 'BULLISH' | 'BEARISH' | 'NEUTRAL' | 'UNKNOWN';
 
 type IndexConfirmation = {
@@ -138,7 +143,7 @@ function isBankOrFinanceStock(symbol: string) {
 }
 
 function getIndexTrend(rawCandles: CandleData[]): IndexTrend {
-  if (!rawCandles || rawCandles.length < 12) {
+  if (!rawCandles || rawCandles.length < 150) {
     return 'UNKNOWN';
   }
 
@@ -237,7 +242,9 @@ function getIndexConfirmation(
         return {
           blocked: true,
           scoreBoost: 0,
-          reasons: ['No trade: BANKNIFTY trend opposes bank/finance SELL setup'],
+          reasons: [
+            'No trade: BANKNIFTY trend opposes bank/finance SELL setup',
+          ],
         };
       }
 
@@ -262,24 +269,42 @@ export function generateSignalForStock(
   allCandles: Record<string, CandleData[]> = {}
 ): TradeSignal {
   const price = priceData?.price || 0;
+  rawCandles = completedCandles(rawCandles);
+  const dataError = candleProblem(rawCandles) || quoteProblem(priceData);
+  if (dataError) return neutralSignal(symbol, [dataError], price);
+  if (candleProblem(completedCandles(allCandles.NIFTY || [])))
+    return neutralSignal(
+      symbol,
+      ['NIFTY confirmation unavailable or stale'],
+      price
+    );
+  if (
+    isBankOrFinanceStock(symbol) &&
+    candleProblem(completedCandles(allCandles.BANKNIFTY || []))
+  )
+    return neutralSignal(
+      symbol,
+      ['BANKNIFTY confirmation unavailable or stale'],
+      price
+    );
 
   if (!isFreshSignalWindowOpenIST()) {
     return neutralSignal(
       symbol,
       [
         'No fresh intraday signal outside trading window',
-        'Fresh signals are allowed only between 09:30 and 14:45 IST',
+        'Fresh signals are allowed only between 09:45 and 11:15 IST',
       ],
       price
     );
   }
 
-  if (!rawCandles || rawCandles.length < 12) {
+  if (!rawCandles || rawCandles.length < 150) {
     return neutralSignal(
       symbol,
       [
         'Waiting for enough 5-minute candle data',
-        'Need at least 12 candles for VWAP, EMA, RSI and ATR confirmation',
+        'Need at least 150 completed candles for VWAP, EMA, RSI and ATR confirmation',
       ],
       price
     );
@@ -298,8 +323,11 @@ export function generateSignalForStock(
   const atr = latest.atr14 || latest.close * 0.004;
   const avgVolume20 = latest.avgVolume20 || 0;
 
-  const dayHigh = Math.max(...candles.map((candle) => candle.high));
-  const dayLow = Math.min(...candles.map((candle) => candle.low));
+  const session = candles.filter(
+    (c) => istDateKey(new Date(c.time)) === istDateKey()
+  );
+  const dayHigh = Math.max(...session.map((c) => c.high));
+  const dayLow = Math.min(...session.map((c) => c.low));
   const dayRange = dayHigh - dayLow;
 
   const positionInRange =

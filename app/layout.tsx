@@ -1,18 +1,12 @@
 import PWARegister from '@/components/PWARegister';
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
 import './globals.css';
 import { AppProvider } from '@/contexts/AppContext';
 import { AlertProvider } from '@/contexts/AlertContext';
 import AlertToasts from '@/components/AlertToasts';
 import BottomNav from '@/components/BottomNav';
 import Disclaimer from '@/components/Disclaimer';
-
-const inter = Inter({
-  subsets: ['latin'],
-  weight: ['400', '500', '600', '700'],
-  variable: '--font-inter',
-});
+import MarketStatus from '@/components/MarketStatus';
 
 export const metadata: Metadata = {
   title: 'Intraday Stock Tracker India',
@@ -30,27 +24,14 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark">
-      <body
-        className={`${inter.variable} font-sans bg-zinc-950 text-white antialiased`}
-      >
+      <body className="font-sans bg-zinc-950 text-white antialiased">
         <PWARegister />
         <AlertProvider>
           <AppProvider>
             <AlertToasts />
 
             <div className="min-h-screen pb-20 max-w-md mx-auto relative">
-              {/* Top Status Bar */}
-              <div className="h-11 bg-black flex items-center justify-center text-[10px] text-zinc-400 border-b border-zinc-800">
-                <div className="flex items-center gap-2">
-                  <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" />
-                  MARKET OPEN • NSE •{' '}
-                  {new Date().toLocaleDateString('en-IN', {
-                    weekday: 'short',
-                    month: 'short',
-                    day: 'numeric',
-                  })}
-                </div>
-              </div>
+              <MarketStatus />
 
               <main className="px-5 pt-6">{children}</main>
 

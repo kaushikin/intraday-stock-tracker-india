@@ -128,49 +128,50 @@ function getSignalStatusLabel(status: SignalLifecycleStatus) {
 // The 7 scoring factors from lib/signalEngine.ts. Each has a bullish (BUY)
 // and bearish (SELL) phrasing -- checking for either lets one definition
 // cover both sides of a signal.
-const FACTOR_DEFINITIONS: { key: string; label: string; phrases: string[] }[] = [
-  {
-    key: 'vwap',
-    label: 'Aligned with VWAP',
-    phrases: ['Price is above VWAP', 'Price is below VWAP'],
-  },
-  {
-    key: 'ema20',
-    label: 'Aligned with EMA 20',
-    phrases: ['Price is above EMA 20', 'Price is below EMA 20'],
-  },
-  {
-    key: 'emaStructure',
-    label: 'EMA 20/50 trend structure',
-    phrases: ['EMA 20 is above EMA 50', 'EMA 20 is below EMA 50'],
-  },
-  {
-    key: 'rsi',
-    label: 'RSI momentum confirmation',
-    phrases: ['RSI is healthy and rising', 'RSI is weak and falling'],
-  },
-  {
-    key: 'volume',
-    label: 'Volume above average',
-    phrases: ['Volume is above average'],
-  },
-  {
-    key: 'candleBody',
-    label: 'Strong candle body',
-    phrases: [
-      'Latest candle has bullish body strength',
-      'Latest candle has bearish body strength',
-    ],
-  },
-  {
-    key: 'positionInRange',
-    label: 'Not at extreme of day range',
-    phrases: [
-      'Price is strong but not at extreme day high',
-      'Price is weak but not at extreme day low',
-    ],
-  },
-];
+const FACTOR_DEFINITIONS: { key: string; label: string; phrases: string[] }[] =
+  [
+    {
+      key: 'vwap',
+      label: 'Aligned with VWAP',
+      phrases: ['Price is above VWAP', 'Price is below VWAP'],
+    },
+    {
+      key: 'ema20',
+      label: 'Aligned with EMA 20',
+      phrases: ['Price is above EMA 20', 'Price is below EMA 20'],
+    },
+    {
+      key: 'emaStructure',
+      label: 'EMA 20/50 trend structure',
+      phrases: ['EMA 20 is above EMA 50', 'EMA 20 is below EMA 50'],
+    },
+    {
+      key: 'rsi',
+      label: 'RSI momentum confirmation',
+      phrases: ['RSI is healthy and rising', 'RSI is weak and falling'],
+    },
+    {
+      key: 'volume',
+      label: 'Volume above average',
+      phrases: ['Volume is above average'],
+    },
+    {
+      key: 'candleBody',
+      label: 'Strong candle body',
+      phrases: [
+        'Latest candle has bullish body strength',
+        'Latest candle has bearish body strength',
+      ],
+    },
+    {
+      key: 'positionInRange',
+      label: 'Not at extreme of day range',
+      phrases: [
+        'Price is strong but not at extreme day high',
+        'Price is weak but not at extreme day low',
+      ],
+    },
+  ];
 
 function getTechnicalScore(signal: TrackedSignal): number | null {
   const scoreLine = (signal.reasons || []).find((r) =>
@@ -198,17 +199,19 @@ function MetricCard({
     tone === 'green'
       ? 'text-green-400'
       : tone === 'red'
-      ? 'text-red-400'
-      : tone === 'yellow'
-      ? 'text-yellow-400'
-      : tone === 'blue'
-      ? 'text-blue-400'
-      : 'text-white';
+        ? 'text-red-400'
+        : tone === 'yellow'
+          ? 'text-yellow-400'
+          : tone === 'blue'
+            ? 'text-blue-400'
+            : 'text-white';
 
   return (
     <div className="rounded-3xl border border-slate-800 bg-[#15161b] p-5 shadow-lg">
       <div className="mb-4 flex items-center justify-between">
-        <p className="text-sm uppercase tracking-wide text-slate-500">{title}</p>
+        <p className="text-sm uppercase tracking-wide text-slate-500">
+          {title}
+        </p>
         <div className="rounded-2xl bg-black/30 p-3 text-slate-400">{icon}</div>
       </div>
 
@@ -250,12 +253,12 @@ function SignalStatusBadge({ status }: { status: SignalLifecycleStatus }) {
   const className = isTargetHit(status)
     ? 'bg-green-500/15 text-green-400'
     : isStopLossHit(status)
-    ? 'bg-red-500/15 text-red-400'
-    : status === 'TRIGGERED'
-    ? 'bg-blue-500/15 text-blue-400'
-    : status === 'WAITING'
-    ? 'bg-yellow-500/15 text-yellow-300'
-    : 'bg-slate-700 text-slate-300';
+      ? 'bg-red-500/15 text-red-400'
+      : status === 'TRIGGERED'
+        ? 'bg-blue-500/15 text-blue-400'
+        : status === 'WAITING'
+          ? 'bg-yellow-500/15 text-yellow-300'
+          : 'bg-slate-700 text-slate-300';
 
   return (
     <span className={`rounded-full px-3 py-1 text-xs font-bold ${className}`}>
@@ -616,9 +619,7 @@ export default function AnalyticsPage() {
 
     const factorRows = FACTOR_DEFINITIONS.map((factor) => {
       const withFactor = completed.filter((signal) =>
-        factor.phrases.some((phrase) =>
-          (signal.reasons || []).includes(phrase)
-        )
+        factor.phrases.some((phrase) => (signal.reasons || []).includes(phrase))
       );
       const withoutFactor = completed.filter(
         (signal) =>
@@ -686,7 +687,9 @@ export default function AnalyticsPage() {
         <div>
           <h1 className="text-4xl font-bold">Analytics</h1>
           <p className="mt-2 text-slate-400">
-            Review trade performance, signal accuracy, and discipline.
+            Legacy journal and signal observations. Old target-hit rates are not
+            verified trade win rates. Paper-study statistics are separate on the
+            Practice tab.
           </p>
         </div>
 
@@ -695,8 +698,8 @@ export default function AnalyticsPage() {
 
           {tradeAnalytics.totalTrades === 0 ? (
             <div className="rounded-3xl border border-slate-800 bg-[#15161b] p-6 text-slate-400">
-              No trades yet. Save a completed signal to journal or add a trade
-              manually to see trade analytics.
+              No legacy journal trades yet. Use Practice for the new paper
+              study.
             </div>
           ) : (
             <>
@@ -726,8 +729,8 @@ export default function AnalyticsPage() {
                     tradeAnalytics.winRate >= 55
                       ? 'green'
                       : tradeAnalytics.winRate >= 40
-                      ? 'yellow'
-                      : 'red'
+                        ? 'yellow'
+                        : 'red'
                   }
                 />
 
@@ -744,8 +747,8 @@ export default function AnalyticsPage() {
                     tradeAnalytics.profitFactor >= 1.5
                       ? 'green'
                       : tradeAnalytics.profitFactor >= 1
-                      ? 'yellow'
-                      : 'red'
+                        ? 'yellow'
+                        : 'red'
                   }
                 />
               </div>
@@ -841,8 +844,6 @@ export default function AnalyticsPage() {
           )}
         </section>
 
-
-
         <JournalPatternAnalytics />
 
         <section className="mt-10">
@@ -876,8 +877,8 @@ export default function AnalyticsPage() {
                     signalAnalytics.targetHitRate >= 60
                       ? 'green'
                       : signalAnalytics.targetHitRate >= 40
-                      ? 'yellow'
-                      : 'red'
+                        ? 'yellow'
+                        : 'red'
                   }
                 />
 
@@ -890,8 +891,8 @@ export default function AnalyticsPage() {
                     signalAnalytics.stopLossRate <= 35
                       ? 'green'
                       : signalAnalytics.stopLossRate <= 55
-                      ? 'yellow'
-                      : 'red'
+                        ? 'yellow'
+                        : 'red'
                   }
                 />
 
@@ -914,8 +915,8 @@ export default function AnalyticsPage() {
                     signalAnalytics.buyAccuracy >= 60
                       ? 'green'
                       : signalAnalytics.buyAccuracy >= 40
-                      ? 'yellow'
-                      : 'red'
+                        ? 'yellow'
+                        : 'red'
                   }
                 />
 
@@ -928,8 +929,8 @@ export default function AnalyticsPage() {
                     signalAnalytics.sellAccuracy >= 60
                       ? 'green'
                       : signalAnalytics.sellAccuracy >= 40
-                      ? 'yellow'
-                      : 'red'
+                        ? 'yellow'
+                        : 'red'
                   }
                 />
 
@@ -995,7 +996,7 @@ export default function AnalyticsPage() {
 
         {factorAnalytics.totalCompleted > 0 && (
           <section className="mt-10">
-            <SectionTitle title="Signal Factor Win Rate (Beta)" />
+            <SectionTitle title="Legacy Factor Target Observations (Unverified)" />
             <p className="mb-4 text-sm text-slate-500">
               Based on {factorAnalytics.totalCompleted} completed signals
               (target hit or stop-loss hit). Small sample sizes early on --
@@ -1021,8 +1022,8 @@ export default function AnalyticsPage() {
                           row.withWinRate >= 60
                             ? 'text-green-400'
                             : row.withWinRate >= 40
-                            ? 'text-yellow-400'
-                            : 'text-red-400'
+                              ? 'text-yellow-400'
+                              : 'text-red-400'
                         }`}
                       >
                         {row.withCount > 0
@@ -1039,8 +1040,8 @@ export default function AnalyticsPage() {
                           row.withoutWinRate >= 60
                             ? 'text-green-400'
                             : row.withoutWinRate >= 40
-                            ? 'text-yellow-400'
-                            : 'text-red-400'
+                              ? 'text-yellow-400'
+                              : 'text-red-400'
                         }`}
                       >
                         {row.withoutCount > 0
@@ -1070,8 +1071,8 @@ export default function AnalyticsPage() {
                       row.winRate >= 60
                         ? 'text-green-400'
                         : row.winRate >= 40
-                        ? 'text-yellow-400'
-                        : 'text-red-400'
+                          ? 'text-yellow-400'
+                          : 'text-red-400'
                     }`}
                   >
                     {row.count > 0 ? formatPercent(row.winRate) : '--'}
@@ -1112,8 +1113,8 @@ export default function AnalyticsPage() {
                           accuracy >= 60
                             ? 'text-green-400'
                             : accuracy >= 40
-                            ? 'text-yellow-400'
-                            : 'text-red-400'
+                              ? 'text-yellow-400'
+                              : 'text-red-400'
                         }`}
                       >
                         {formatPercent(accuracy)}
@@ -1191,16 +1192,12 @@ export default function AnalyticsPage() {
                     <div className="mt-4 grid grid-cols-3 gap-3 text-sm">
                       <div className="rounded-2xl bg-black/30 p-3">
                         <p className="text-slate-500">Wins</p>
-                        <p className="font-bold text-green-400">
-                          {stock.wins}
-                        </p>
+                        <p className="font-bold text-green-400">{stock.wins}</p>
                       </div>
 
                       <div className="rounded-2xl bg-black/30 p-3">
                         <p className="text-slate-500">Losses</p>
-                        <p className="font-bold text-red-400">
-                          {stock.losses}
-                        </p>
+                        <p className="font-bold text-red-400">{stock.losses}</p>
                       </div>
 
                       <div className="rounded-2xl bg-black/30 p-3">
@@ -1239,8 +1236,8 @@ export default function AnalyticsPage() {
                             signal.side === 'BUY'
                               ? 'bg-green-500/15 text-green-400'
                               : signal.side === 'SELL'
-                              ? 'bg-red-500/15 text-red-400'
-                              : 'bg-slate-700 text-slate-300'
+                                ? 'bg-red-500/15 text-red-400'
+                                : 'bg-slate-700 text-slate-300'
                           }`}
                         >
                           {signal.side}

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { XMLParser } from 'fast-xml-parser';
 import { INSTRUMENTS } from '@/lib/instruments';
+import { recentHeadlines } from '@/lib/sentiment';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,7 +27,7 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const symbol = searchParams.get('symbol')?.toUpperCase();
 
-    if (!symbol) {
+    if (!symbol || !INSTRUMENTS[symbol]) {
       return NextResponse.json(
         {
           success: false,
@@ -50,6 +51,7 @@ export async function GET(req: NextRequest) {
 
     const response = await fetch(url, {
       cache: 'no-store',
+      signal: AbortSignal.timeout(10_000),
       headers: {
         'User-Agent':
           'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
@@ -81,7 +83,7 @@ export async function GET(req: NextRequest) {
 
     const itemsArray = Array.isArray(rawItems) ? rawItems : [rawItems];
 
-    const news: NewsItem[] = itemsArray.slice(0, 5).map((item: any) => ({
+    const news: NewsItem[] = itemsArray.slice(0, 30).map((item: any) => ({
       title: cleanTitle(item.title || ''),
       link: item.link || '',
       source: item.source?.['#text'] || item.source || 'Google News',
@@ -92,7 +94,9 @@ export async function GET(req: NextRequest) {
       success: true,
       symbol,
       companyName,
-      news,
+      news: recentHeadlines(
+        news.map((item) => ({ ...item, publishedAt: item.publishedAt || '' }))
+      ),
     });
   } catch (error: any) {
     return NextResponse.json(

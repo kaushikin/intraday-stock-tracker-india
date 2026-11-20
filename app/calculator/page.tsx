@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { calculatePositionSizing } from '@/lib/positionSizing';
 import {
   AlertTriangle,
   Calculator as CalculatorIcon,
@@ -41,8 +42,8 @@ function parseInput(value: string) {
 function getDefaultSettings(): SavedCalculatorSettings {
   if (typeof window === 'undefined') {
     return {
-      capital: '100000',
-      riskAmount: '500',
+      capital: '10000',
+      riskAmount: '50',
     };
   }
 
@@ -51,21 +52,21 @@ function getDefaultSettings(): SavedCalculatorSettings {
 
     if (!saved) {
       return {
-        capital: '100000',
-        riskAmount: '500',
+        capital: '10000',
+        riskAmount: '50',
       };
     }
 
     const parsed = JSON.parse(saved);
 
     return {
-      capital: String(parsed.capital || '100000'),
-      riskAmount: String(parsed.riskAmount || '500'),
+      capital: String(parsed.capital || '10000'),
+      riskAmount: String(parsed.riskAmount || '50'),
     };
   } catch {
     return {
-      capital: '100000',
-      riskAmount: '500',
+      capital: '10000',
+      riskAmount: '50',
     };
   }
 }
@@ -85,12 +86,12 @@ function ResultCard({
     tone === 'green'
       ? 'text-emerald-400'
       : tone === 'red'
-      ? 'text-red-400'
-      : tone === 'yellow'
-      ? 'text-yellow-400'
-      : tone === 'blue'
-      ? 'text-blue-400'
-      : 'text-white';
+        ? 'text-red-400'
+        : tone === 'yellow'
+          ? 'text-yellow-400'
+          : tone === 'blue'
+            ? 'text-blue-400'
+            : 'text-white';
 
   return (
     <div className="rounded-3xl border border-zinc-800 bg-zinc-900 p-5">
@@ -130,20 +131,24 @@ function Field({
 
 export default function PositionSizeCalculatorPage() {
   const [side, setSide] = useState<TradeSide>('BUY');
-  const [capital, setCapital] = useState('100000');
-  const [riskAmount, setRiskAmount] = useState('500');
+  const [capital, setCapital] = useState('10000');
+  const [riskAmount, setRiskAmount] = useState('50');
   const [entryPrice, setEntryPrice] = useState('');
   const [stopLoss, setStopLoss] = useState('');
   const [targetPrice, setTargetPrice] = useState('');
+  const [costs, setCosts] = useState('16');
+  const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
     const saved = getDefaultSettings();
 
     setCapital(saved.capital);
     setRiskAmount(saved.riskAmount);
+    setHydrated(true);
   }, []);
 
   useEffect(() => {
+    if (!hydrated) return;
     try {
       localStorage.setItem(
         CALCULATOR_SETTINGS_KEY,
@@ -155,114 +160,49 @@ export default function PositionSizeCalculatorPage() {
     } catch {
       // Ignore localStorage errors
     }
-  }, [capital, riskAmount]);
+  }, [capital, riskAmount, hydrated]);
 
   const result = useMemo(() => {
-    const capitalValue = parseInput(capital);
-    const riskValue = parseInput(riskAmount);
-    const entry = parseInput(entryPrice);
-    const sl = parseInput(stopLoss);
-    const target = parseInput(targetPrice);
-
-    const riskPerShare =
-      side === 'BUY'
-        ? entry > 0 && sl > 0
-          ? entry - sl
-          : 0
-        : entry > 0 && sl > 0
-        ? sl - entry
-        : 0;
-
-    const isStopLossValid = riskPerShare > 0;
-
-    const quantity =
-      isStopLossValid && riskValue > 0
-        ? Math.floor(riskValue / riskPerShare)
-        : 0;
-
-    const capitalRequired = quantity * entry;
-    const maxLoss = quantity * riskPerShare;
-
-    const rewardPerShare =
-      target > 0 && entry > 0
-        ? side === 'BUY'
-          ? target - entry
-          : entry - target
-        : 0;
-
-    const targetProfit =
-      rewardPerShare > 0 && quantity > 0 ? rewardPerShare * quantity : 0;
-
-    const riskReward =
-      riskPerShare > 0 && rewardPerShare > 0
-        ? rewardPerShare / riskPerShare
-        : 0;
-
-    const riskPercent =
-      capitalValue > 0 && maxLoss > 0 ? (maxLoss / capitalValue) * 100 : 0;
-
-    const capitalUsagePercent =
-      capitalValue > 0 && capitalRequired > 0
-        ? (capitalRequired / capitalValue) * 100
-        : 0;
-
-    const warnings: string[] = [];
-
-    if (entry > 0 && sl > 0 && !isStopLossValid) {
-      warnings.push(
-        side === 'BUY'
-          ? 'For BUY trades, stop loss must be below entry price.'
-          : 'For SELL trades, stop loss must be above entry price.'
+    const capitalValue = parseInput(capital),
+      riskValue = Math.max(
+        0,
+        Math.min(parseInput(riskAmount), 50, capitalValue * 0.005)
       );
-    }
-
-    if (entry > 0 && sl > 0 && quantity <= 0 && isStopLossValid) {
-      warnings.push(
-        'Risk amount is too small for this entry/stop-loss distance. Quantity becomes 0.'
-      );
-    }
-
-    if (capitalValue > 0 && capitalRequired > capitalValue) {
-      warnings.push(
-        'Capital required is higher than available capital. Reduce quantity or risk.'
-      );
-    }
-
-    if (riskPercent > 2) {
-      warnings.push(
-        `Risk is ${riskPercent.toFixed(
-          2
-        )}% of capital. Many intraday traders keep risk near 0.5%–1%.`
-      );
-    }
-
-    if (target > 0 && rewardPerShare <= 0) {
-      warnings.push(
-        side === 'BUY'
-          ? 'For BUY trades, target should be above entry price.'
-          : 'For SELL trades, target should be below entry price.'
-      );
-    }
-
+    const entry = parseInput(entryPrice),
+      sl = parseInput(stopLoss),
+      target = parseInput(targetPrice);
+    const sizing = calculatePositionSizing({
+      side,
+      entry,
+      stopLoss: sl,
+      target,
+      maxRiskAmount: riskValue,
+      estimatedCharges: parseInput(costs),
+      availableCapital: capitalValue * 0.95,
+    });
+    const quantity = sizing.suggestedQuantity,
+      capitalRequired = quantity * entry;
     return {
       capitalValue,
       riskValue,
       entry,
       sl,
       target,
-      riskPerShare,
-      isStopLossValid,
+      riskPerShare: sizing.riskPerShare,
+      isStopLossValid: sizing.riskPerShare > 0,
       quantity,
       capitalRequired,
-      maxLoss,
-      rewardPerShare,
-      targetProfit,
-      riskReward,
-      riskPercent,
-      capitalUsagePercent,
-      warnings,
+      maxLoss: sizing.netLossAtStop,
+      rewardPerShare: sizing.rewardPerShare,
+      targetProfit: sizing.netProfitAtTarget,
+      riskReward: sizing.netRiskReward,
+      riskPercent:
+        capitalValue > 0 ? (sizing.netLossAtStop / capitalValue) * 100 : 0,
+      capitalUsagePercent:
+        capitalValue > 0 ? (capitalRequired / capitalValue) * 100 : 0,
+      warnings: sizing.warnings,
     };
-  }, [capital, riskAmount, entryPrice, stopLoss, targetPrice, side]);
+  }, [capital, riskAmount, entryPrice, stopLoss, targetPrice, side, costs]);
 
   function resetTradeInputs() {
     setEntryPrice('');
@@ -295,8 +235,10 @@ export default function PositionSizeCalculatorPage() {
       </div>
 
       <div className="rounded-2xl border border-yellow-500/20 bg-yellow-500/10 p-4 text-sm text-yellow-200">
-        Educational risk calculator only. It does not place orders and does not
-        recommend trades.
+        Cash-equity study calculator. Risk capped at ₹50 or 0.5% of capital
+        including the entered costs. Cash use capped at 95%; no leverage or
+        derivative lots. Paper desk also checks remaining daily/weekly/monthly
+        budgets.
       </div>
 
       <section className="rounded-3xl border border-zinc-800 bg-zinc-900/60 p-5">
@@ -309,17 +251,24 @@ export default function PositionSizeCalculatorPage() {
             label="Trading Capital ₹"
             value={capital}
             onChange={setCapital}
-            placeholder="100000"
+            placeholder="10000"
           />
 
           <Field
             label="Risk Per Trade ₹"
             value={riskAmount}
             onChange={setRiskAmount}
-            placeholder="500"
+            placeholder="50"
           />
         </div>
 
+        <div className="mt-4">
+          <Field
+            label="Total estimated charges + slippage ₹"
+            value={costs}
+            onChange={setCosts}
+          />
+        </div>
         <div className="mt-4 rounded-2xl border border-zinc-800 bg-black/20 p-4 text-sm text-zinc-400">
           Current planned risk:{' '}
           <span className="font-mono text-white">
@@ -454,12 +403,8 @@ export default function PositionSizeCalculatorPage() {
           <ResultCard
             label="Capital Required"
             value={formatCurrency(result.capitalRequired)}
-            subtitle={`${formatNumber(
-              result.capitalUsagePercent
-            )}% of capital`}
-            tone={
-              result.capitalRequired > result.capitalValue ? 'red' : 'blue'
-            }
+            subtitle={`${formatNumber(result.capitalUsagePercent)}% of capital`}
+            tone={result.capitalRequired > result.capitalValue ? 'red' : 'blue'}
           />
 
           <ResultCard
@@ -476,23 +421,21 @@ export default function PositionSizeCalculatorPage() {
           <ResultCard
             label="Risk / Reward"
             value={
-              result.riskReward > 0
-                ? `1:${result.riskReward.toFixed(2)}`
-                : '--'
+              result.riskReward > 0 ? `1:${result.riskReward.toFixed(2)}` : '--'
             }
             subtitle={
               result.riskReward >= 2
                 ? 'Strong reward compared to risk'
                 : result.riskReward >= 1
-                ? 'Reward is at least equal to risk'
-                : 'Enter valid target to calculate'
+                  ? 'Reward is at least equal to risk'
+                  : 'Enter valid target to calculate'
             }
             tone={
               result.riskReward >= 2
                 ? 'green'
                 : result.riskReward >= 1
-                ? 'yellow'
-                : 'neutral'
+                  ? 'yellow'
+                  : 'neutral'
             }
           />
         </div>
@@ -527,7 +470,10 @@ export default function PositionSizeCalculatorPage() {
           <li>• Enter planned entry and stop loss.</li>
           <li>• Use suggested quantity instead of guessing position size.</li>
           <li>• If capital required is too high, reduce risk or skip trade.</li>
-          <li>• This calculator excludes slippage, taxes, and brokerage impact.</li>
+          <li>
+            • Include all taxes, brokerage and slippage in the cost estimate;
+            this is not an automatic broker fee quote.
+          </li>
         </ul>
       </section>
 
@@ -544,9 +490,7 @@ export default function PositionSizeCalculatorPage() {
 
         <div className="rounded-3xl border border-red-500/20 bg-red-500/10 p-4">
           <TrendingDown className="h-5 w-5 text-red-400" />
-          <p className="mt-3 text-sm font-semibold text-red-300">
-            Avoid
-          </p>
+          <p className="mt-3 text-sm font-semibold text-red-300">Avoid</p>
           <p className="mt-1 text-xs text-zinc-400">
             Increasing quantity after loss.
           </p>

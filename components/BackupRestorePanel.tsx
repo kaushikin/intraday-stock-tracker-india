@@ -3,8 +3,9 @@
 import { useRef, useState } from 'react';
 import { AlertTriangle, Database, Download, Upload } from 'lucide-react';
 import { TRADE_RULE_SETTINGS_KEY } from '@/lib/tradeRules';
+import { PAPER_BOOK_KEY, parsePaperBook } from '@/lib/paperBook';
 
-const BACKUP_VERSION = 1;
+const BACKUP_VERSION = 2;
 
 const STORAGE_KEYS = {
   watchlist: 'watchlist',
@@ -18,6 +19,7 @@ type AppBackupFile = {
   version: number;
   exportedAt: string;
   data: {
+    paperBook?: unknown;
     watchlist: unknown;
     trades: unknown;
     trackedSignals: unknown;
@@ -93,6 +95,7 @@ export default function BackupRestorePanel() {
       version: BACKUP_VERSION,
       exportedAt: new Date().toISOString(),
       data: {
+        paperBook: safeJsonParse(localStorage.getItem(PAPER_BOOK_KEY)),
         watchlist: safeJsonParse(localStorage.getItem(STORAGE_KEYS.watchlist)),
         trades: safeJsonParse(localStorage.getItem(STORAGE_KEYS.trades)),
         trackedSignals: safeJsonParse(
@@ -134,11 +137,32 @@ export default function BackupRestorePanel() {
       const text = await file.text();
       const parsed = JSON.parse(text);
 
+      if (parsed?.version === 1 && Array.isArray(parsed.positions)) {
+        const paper = parsePaperBook(text);
+        if (
+          !window.confirm(
+            'Replace the paper journal with this backup? Existing watchlist and legacy trades will be kept.'
+          )
+        )
+          return;
+        if (!navigator.locks)
+          throw new Error('Browser journal lock unavailable.');
+        await navigator.locks.request(PAPER_BOOK_KEY, async () => {
+          localStorage.setItem(PAPER_BOOK_KEY, JSON.stringify(paper));
+        });
+        window.dispatchEvent(new Event('paperBookUpdated'));
+        setStatusMessage('Paper journal restored.');
+        return;
+      }
       if (!isValidBackup(parsed)) {
         setErrorMessage('This does not look like a valid app backup file.');
         return;
       }
 
+      const paper =
+        parsed.data.paperBook == null
+          ? undefined
+          : parsePaperBook(JSON.stringify(parsed.data.paperBook));
       const confirmed = window.confirm(
         [
           'Restore this backup?',
@@ -148,6 +172,9 @@ export default function BackupRestorePanel() {
           '• Trades',
           '• Tracked signals',
           '• Trade rule settings',
+          paper
+            ? '• Paper journal'
+            : '• Paper journal kept (not included in this backup)',
           '',
           'Continue?',
         ].join('\n')
@@ -177,6 +204,14 @@ export default function BackupRestorePanel() {
         );
       }
 
+      if (paper) {
+        if (!navigator.locks)
+          throw new Error('Browser journal lock unavailable.');
+        await navigator.locks.request(PAPER_BOOK_KEY, async () => {
+          localStorage.setItem(PAPER_BOOK_KEY, JSON.stringify(paper));
+        });
+        window.dispatchEvent(new Event('paperBookUpdated'));
+      }
       window.dispatchEvent(new Event('tradeRulesUpdated'));
       window.dispatchEvent(new Event('storage'));
 
@@ -202,16 +237,17 @@ export default function BackupRestorePanel() {
           <h2 className="text-lg font-bold text-white">Backup / Restore</h2>
 
           <p className="mt-2 text-sm text-slate-400">
-            Export your local trades, watchlist, tracked signals, and trade rule
-            settings to a backup file. Use restore when changing browser/device.
+            Export your paper journal, local trades, watchlist, tracked signals,
+            and trade rule settings to a backup file. Use restore when changing
+            browser/device.
           </p>
 
           <div className="mt-4 rounded-2xl border border-yellow-500/20 bg-yellow-500/10 p-4 text-sm text-yellow-200">
             <div className="flex gap-2">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
               <p>
-                Backup files contain your trading journal data. Keep them private.
-                This does not export Angel One credentials or API keys.
+                Backup files contain your trading journal data. Keep them
+                private. This does not export Angel One credentials or API keys.
               </p>
             </div>
           </div>

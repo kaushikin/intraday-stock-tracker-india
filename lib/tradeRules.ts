@@ -1,3 +1,5 @@
+import { istDateKey } from './marketHours';
+
 export type TradeRuleSettings = {
   dailyTarget: number;
   dailyLossLimit: number;
@@ -31,9 +33,9 @@ type TradeLike = {
 export const TRADE_RULE_SETTINGS_KEY = 'trade_rule_settings_v1';
 
 export const DEFAULT_TRADE_RULES: TradeRuleSettings = {
-  dailyTarget: 500,
-  dailyLossLimit: -500,
-  maxTradesPerDay: 5,
+  dailyTarget: 0,
+  dailyLossLimit: -100,
+  maxTradesPerDay: 2,
   maxLossStreak: 2,
 };
 
@@ -42,7 +44,7 @@ export function normalizeTradeRuleSettings(
 ): TradeRuleSettings {
   return {
     dailyTarget:
-      Number(input.dailyTarget) > 0
+      Number.isFinite(input.dailyTarget) && Number(input.dailyTarget) >= 0
         ? Number(input.dailyTarget)
         : DEFAULT_TRADE_RULES.dailyTarget,
 
@@ -114,14 +116,9 @@ export function getTradePL(trade: TradeLike) {
 function isToday(dateString?: string) {
   if (!dateString) return false;
 
-  const date = new Date(dateString);
-  const today = new Date();
-
-  return (
-    date.getFullYear() === today.getFullYear() &&
-    date.getMonth() === today.getMonth() &&
-    date.getDate() === today.getDate()
-  );
+  return /^\d{4}-\d{2}-\d{2}$/.test(dateString)
+    ? dateString === istDateKey()
+    : istDateKey(new Date(dateString)) === istDateKey();
 }
 
 export function getTodayTrades<T extends TradeLike>(trades: T[]) {
@@ -168,7 +165,8 @@ export function evaluateTradeRules<T extends TradeLike>(
 
   const lossStreak = calculateLossStreak(todayTrades);
 
-  const dailyTargetHit = dailyPL >= normalizedRules.dailyTarget;
+  const dailyTargetHit =
+    normalizedRules.dailyTarget > 0 && dailyPL >= normalizedRules.dailyTarget;
   const dailyLossLimitHit = dailyPL <= normalizedRules.dailyLossLimit;
   const maxTradesHit = todayTrades.length >= normalizedRules.maxTradesPerDay;
   const maxLossStreakHit = lossStreak >= normalizedRules.maxLossStreak;
@@ -185,9 +183,7 @@ export function evaluateTradeRules<T extends TradeLike>(
 
   if (dailyLossLimitHit) {
     warnings.push(
-      `Daily loss limit hit: ₹${dailyPL.toFixed(
-        2
-      )}. Stop trading for the day.`
+      `Daily loss limit hit: ₹${dailyPL.toFixed(2)}. Stop trading for the day.`
     );
   }
 

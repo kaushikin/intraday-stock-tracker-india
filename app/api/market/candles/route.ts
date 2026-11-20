@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAngelCandleData } from '@/lib/angel';
-import { INSTRUMENTS } from '@/lib/instruments';
+import { getCashInstruments } from '@/lib/cashInstruments';
+import { completedCandles } from '@/lib/marketDataQuality';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,7 +24,7 @@ declare global {
   var angelCandleCache: Record<string, CandleCacheValue> | undefined;
 }
 
-const CANDLE_CACHE_TTL_MS = 3 * 60 * 1000;
+const CANDLE_CACHE_TTL_MS = 20 * 1000;
 const CANDLE_SYMBOL_DELAY_MS = 800;
 
 function sleep(ms: number) {
@@ -129,7 +130,9 @@ function getTodayAngelRange() {
     tradeDate = previousTradingDay(now);
   }
 
-  const from = makeISTDateTime(tradeDate, 9, 15);
+  // Enough prior sessions for 100 complete 15-minute warm-up bars.
+  const historyStart = new Date(tradeDate.getTime() - 14 * 86400000);
+  const from = makeISTDateTime(historyStart, 9, 15);
 
   let to: Date;
 
@@ -159,10 +162,7 @@ function normalizeAngelCandles(rawCandles: any[]): Candle[] {
     })
     .filter((candle) => {
       return (
-        candle.open > 0 &&
-        candle.high > 0 &&
-        candle.low > 0 &&
-        candle.close > 0
+        candle.open > 0 && candle.high > 0 && candle.low > 0 && candle.close > 0
       );
     });
 }
@@ -175,7 +175,20 @@ export async function POST(req: NextRequest) {
       ? body.symbols.map((s: string) => String(s).toUpperCase().trim())
       : [];
 
-    const interval = body.interval || 'FIVE_MINUTE';
+    const interval = 'FIVE_MINUTE';
+    if (body.interval && body.interval !== interval)
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Only five-minute research candles are supported.',
+        },
+        { status: 400 }
+      );
+    if (symbols.length > 20)
+      return NextResponse.json(
+        { success: false, error: 'Request at most 20 symbols.' },
+        { status: 400 }
+      );
 
     if (!symbols.length) {
       return NextResponse.json(
@@ -190,6 +203,7 @@ export async function POST(req: NextRequest) {
     }
 
     const { fromdate, todate } = getTodayAngelRange();
+    const instruments = await getCashInstruments();
 
     const result: Record<string, Candle[]> = {};
     const errors: any[] = [];
@@ -198,18 +212,22 @@ export async function POST(req: NextRequest) {
       global.angelCandleCache = {};
     }
 
-    for (const symbol of symbols) {
-      const instrument = INSTRUMENTS[symbol];
+    for (const [key, value] of Object.entries(global.angelCandleCache)) {
+      if (value.expiresAt <= Date.now()) delete global.angelCandleCache[key];
+    }
+    for (const symbol of [...new Set(symbols)]) {
+      const instrument = instruments[symbol];
 
-      if (!instrument) {
+      if (!instrument || instrument.exchange !== 'NSE') {
         errors.push({
           symbol,
-          error: 'Instrument not found',
+          error:
+            'Only supported NSE cash shares and indices are available in this research feed',
         });
         continue;
       }
 
-      const cacheKey = `${symbol}:${interval}:${fromdate}`;
+      const cacheKey = `${symbol}:${interval}:${fromdate}:${Math.floor(Date.now() / 300000)}`;
       const cached = global.angelCandleCache[cacheKey];
 
       if (cached && cached.expiresAt > Date.now()) {
@@ -226,7 +244,9 @@ export async function POST(req: NextRequest) {
           todate,
         });
 
-        const normalizedCandles = normalizeAngelCandles(angelResponse?.data || []);
+        const normalizedCandles = completedCandles(
+          normalizeAngelCandles(angelResponse?.data || [])
+        );
 
         result[symbol] = normalizedCandles;
 
@@ -235,22 +255,12 @@ export async function POST(req: NextRequest) {
           candles: normalizedCandles,
         };
       } catch (error: any) {
-        const staleCached = global.angelCandleCache?.[cacheKey];
-
-        if (staleCached?.candles?.length) {
-          result[symbol] = staleCached.candles;
-
-          errors.push({
-            symbol,
-            warning: 'Using cached candles because Angel candle request failed',
-            error: error?.message || 'Failed to fetch candles',
-          });
-        } else {
-          errors.push({
-            symbol,
-            error: error?.message || 'Failed to fetch candles',
-          });
-        }
+        // Clear the failed symbol. Never silently promote stale cached candles.
+        result[symbol] = [];
+        errors.push({
+          symbol,
+          error: error?.message || 'Failed to fetch candles',
+        });
       }
 
       await sleep(CANDLE_SYMBOL_DELAY_MS);

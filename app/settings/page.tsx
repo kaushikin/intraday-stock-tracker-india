@@ -66,10 +66,10 @@ function StatusCard({
     tone === 'green'
       ? 'text-green-400'
       : tone === 'red'
-      ? 'text-red-400'
-      : tone === 'yellow'
-      ? 'text-yellow-400'
-      : 'text-white';
+        ? 'text-red-400'
+        : tone === 'yellow'
+          ? 'text-yellow-400'
+          : 'text-white';
 
   return (
     <div className="rounded-3xl border border-slate-800 bg-[#15161b] p-5">
@@ -83,9 +83,8 @@ function StatusCard({
 export default function SettingsPage() {
   const { trades } = useApp();
 
-  const [settings, setSettings] = useState<TradeRuleSettings>(
-    DEFAULT_TRADE_RULES
-  );
+  const [settings, setSettings] =
+    useState<TradeRuleSettings>(DEFAULT_TRADE_RULES);
 
   const [savedMessage, setSavedMessage] = useState('');
 
@@ -129,7 +128,8 @@ export default function SettingsPage() {
           <div>
             <h1 className="text-4xl font-bold">Settings</h1>
             <p className="mt-2 text-slate-400">
-              Configure risk rules and discipline limits for intraday trading.
+              Configure legacy journal reminders. The paper desk separately
+              enforces the ₹10,000 study limits.
             </p>
           </div>
         </div>
@@ -149,14 +149,14 @@ export default function SettingsPage() {
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field
               label="Daily Target"
-              description="When today's net P/L reaches this amount, app suggests stopping."
+              description="Optional journal reminder; use 0 for no profit target."
               value={settings.dailyTarget}
               onChange={(value) => updateField('dailyTarget', value)}
             />
 
             <Field
               label="Daily Loss Limit"
-              description="Use a negative value. Example: -500."
+              description="Use a negative value. Example: -100."
               value={settings.dailyLossLimit}
               onChange={(value) => updateField('dailyLossLimit', value)}
             />
@@ -215,8 +215,8 @@ export default function SettingsPage() {
                 status.dailyTargetHit
                   ? 'green'
                   : status.dailyLossLimitHit
-                  ? 'red'
-                  : 'neutral'
+                    ? 'red'
+                    : 'neutral'
               }
             />
 
@@ -283,11 +283,13 @@ export default function SettingsPage() {
               <h3 className="font-bold text-white">Recommended Discipline</h3>
 
               <ul className="mt-3 space-y-2 text-sm text-slate-400">
-                <li>• Stop after daily target is hit.</li>
+                <li>• Do not force trades to reach a daily profit target.</li>
                 <li>• Stop immediately after daily loss limit is hit.</li>
                 <li>• Avoid overtrading after max trades are reached.</li>
                 <li>• Take a break after loss streak warning.</li>
-                <li>• Review Analytics and Trade Journal before next session.</li>
+                <li>
+                  • Review Analytics and Trade Journal before next session.
+                </li>
               </ul>
             </div>
           </div>

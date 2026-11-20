@@ -32,7 +32,7 @@ const navItems = [
   },
   {
     href: '/signals',
-    label: 'Signals',
+    label: 'Practice',
     icon: LineChart,
   },
   {

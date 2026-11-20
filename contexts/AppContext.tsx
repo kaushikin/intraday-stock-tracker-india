@@ -7,8 +7,9 @@ import React, {
   useEffect,
   ReactNode,
   useCallback,
+  useRef,
 } from 'react';
-import { format } from 'date-fns';
+import { istDateKey } from '@/lib/marketHours';
 import { INSTRUMENTS } from '@/lib/instruments';
 import {
   DEFAULT_TRADE_RULES,
@@ -25,6 +26,13 @@ export interface PriceData {
   low?: number;
   close?: number;
   lastUpdated?: string;
+  exchangeTime?: string;
+  tradeTime?: string;
+  bid?: number;
+  ask?: number;
+  askQuantity?: number;
+  tickSize?: number;
+  instrumentAsOf?: string;
 }
 
 export interface CandleData {
@@ -119,7 +127,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     'HDFCBANK',
   ]);
 
-  const [prices, setPrices] = useState<Record<string, PriceData>>(INITIAL_PRICES);
+  const [prices, setPrices] =
+    useState<Record<string, PriceData>>(INITIAL_PRICES);
   const [candles, setCandles] = useState<Record<string, CandleData[]>>({});
   const [candleWarnings, setCandleWarnings] = useState<CandleWarning[]>([]);
   const [trades, setTrades] = useState<Trade[]>([]);
@@ -131,7 +140,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [tradeRuleSettings, setTradeRuleSettings] =
     useState<TradeRuleSettings>(DEFAULT_TRADE_RULES);
 
-  const today = format(new Date(), 'yyyy-MM-dd');
+  const [today, setToday] = useState(istDateKey());
+  const quoteBusy = useRef(false);
+  const candleBusy = useRef(false);
 
   useEffect(() => {
     const savedWatchlist = localStorage.getItem('watchlist');
@@ -188,7 +199,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const pl = calculateDailyPL(trades);
 
     setDailyPL(pl);
-    setIsTargetReached(pl >= tradeRuleSettings.dailyTarget);
+    setIsTargetReached(
+      tradeRuleSettings.dailyTarget > 0 && pl >= tradeRuleSettings.dailyTarget
+    );
     setIsLossLimitReached(pl <= tradeRuleSettings.dailyLossLimit);
   }, [trades, calculateDailyPL, tradeRuleSettings]);
 
@@ -225,12 +238,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const data = await response.json();
 
       if (!response.ok || !data.success) {
-        console.error('Failed to fetch live prices:', data);
+        setPrices({});
         return;
       }
 
       setPrices((prev) => {
         const updated = { ...prev };
+        validSymbols.forEach((symbol) => {
+          delete updated[symbol];
+        });
 
         data.quotes.forEach((quote: any) => {
           updated[quote.symbol] = {
@@ -241,16 +257,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
             low: Number(quote.low || 0),
             close: Number(quote.close || 0),
             lastUpdated: quote.lastUpdated,
+            exchangeTime: quote.exchangeTime,
+            tickSize: Number(quote.tickSize || 0),
+            instrumentAsOf: quote.instrumentAsOf,
+            tradeTime: quote.tradeTime,
+            bid: Number(quote.bid || 0),
+            ask: Number(quote.ask || 0),
+            askQuantity: Number(quote.askQuantity || 0),
           };
         });
 
         return updated;
       });
     } catch (error) {
+      setPrices({});
       console.error('Live price update failed:', error);
     }
   }, [watchlist]);
-
 
   const updateCandles = useCallback(async () => {
     if (!watchlist.length) return;
@@ -283,61 +306,59 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const data = await response.json();
 
       if (!response.ok || !data.success) {
-        console.error('Failed to fetch candle data:', data);
+        setCandles({});
+        setCandleWarnings([
+          { symbol: 'ALL', error: data.error || 'Candle feed unavailable' },
+        ]);
         return;
       }
 
-      // Merge rather than replace: a symbol missing from this poll's
-      // response (fetch failed, no cache available yet) should keep its
-      // last known good candles instead of being wiped to empty, which
-      // would make the signal engine silently treat it as "not enough
-      // data" and skip a signal it otherwise could have generated.
-      setCandles((prev) => ({ ...prev, ...(data.candles || {}) }));
+      setCandles(data.candles || {});
       setCandleWarnings(data.errors || []);
     } catch (error) {
+      setCandles({});
+      setCandleWarnings([{ symbol: 'ALL', error: 'Candle feed unavailable' }]);
       console.error('Candle update failed:', error);
     }
   }, [watchlist]);
 
   useEffect(() => {
     if (!hydrated) return;
-
-    // Fetch once on app load for display.
-    updatePrices();
-
-    // Avoid repeated Angel quote calls outside market hours.
-    if (!isIndianMarketOpen()) {
-      return;
-    }
-
-    const priceInterval = setInterval(() => {
-      if (isIndianMarketOpen()) {
-        updatePrices();
+    let lastCandleFetch = 0;
+    const refresh = () => {
+      setToday(istDateKey());
+      if (document.hidden || !isIndianMarketOpen()) return;
+      if (!quoteBusy.current) {
+        quoteBusy.current = true;
+        updatePrices().finally(() => {
+          quoteBusy.current = false;
+        });
       }
-    }, 10000);
-
-    return () => clearInterval(priceInterval);
-  }, [hydrated, updatePrices]);
-
-  useEffect(() => {
-    if (!hydrated) return;
-
-    // Fetch once on app load. Outside market hours this can load previous session candles.
-    updateCandles();
-
-    // Historical candle API has stricter rate limits, so do not poll after hours.
-    if (!isIndianMarketOpen()) {
-      return;
-    }
-
-    const candleInterval = setInterval(() => {
-      if (isIndianMarketOpen()) {
-        updateCandles();
+      if (!candleBusy.current && Date.now() - lastCandleFetch >= 30_000) {
+        candleBusy.current = true;
+        lastCandleFetch = Date.now();
+        updateCandles().finally(() => {
+          candleBusy.current = false;
+        });
       }
-    }, 120000);
-
-    return () => clearInterval(candleInterval);
-  }, [hydrated, updateCandles]);
+    };
+    // Timer remains mounted before open. Resuming a tab immediately checks freshness.
+    refresh();
+    const timer = window.setInterval(refresh, 10_000);
+    const resume = () => {
+      if (!document.hidden) {
+        lastCandleFetch = 0;
+        refresh();
+      }
+    };
+    window.addEventListener('focus', resume);
+    document.addEventListener('visibilitychange', resume);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', resume);
+      document.removeEventListener('visibilitychange', resume);
+    };
+  }, [hydrated, updatePrices, updateCandles]);
 
   const addToWatchlist = (symbol: string) => {
     const upperSymbol = symbol.toUpperCase().trim();

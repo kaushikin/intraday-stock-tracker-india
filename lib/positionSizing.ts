@@ -5,6 +5,9 @@ export type PositionSizingInput = {
   target: number;
   maxRiskAmount: number;
   estimatedCharges: number;
+  slippageAllowance?: number;
+  availableCapital?: number;
+  lotSize?: number;
 };
 
 export type PositionSizingResult = {
@@ -29,39 +32,79 @@ function round2(value: number) {
 export function calculatePositionSizing(
   input: PositionSizingInput
 ): PositionSizingResult {
-  const entry = Number(input.entry || 0);
-  const stopLoss = Number(input.stopLoss || 0);
-  const target = Number(input.target || 0);
-  const maxRiskAmount = Math.max(Number(input.maxRiskAmount || 0), 0);
-  const estimatedCharges = Math.max(Number(input.estimatedCharges || 0), 0);
-
+  const finite = (value: number | undefined, fallback = 0) =>
+    Number.isFinite(value) ? Number(value) : fallback;
+  const entry = finite(input.entry),
+    stopLoss = finite(input.stopLoss),
+    target = finite(input.target);
+  const maxRiskAmount = Math.max(finite(input.maxRiskAmount), 0);
+  const estimatedCharges =
+    Math.max(finite(input.estimatedCharges), 0) +
+    Math.max(finite(input.slippageAllowance), 0);
+  const availableCapital = Math.max(finite(input.availableCapital, 9500), 0);
+  const lot = input.lotSize === undefined ? 1 : input.lotSize;
+  const valid =
+    [
+      input.entry,
+      input.stopLoss,
+      input.target,
+      input.maxRiskAmount,
+      input.estimatedCharges,
+    ].every(Number.isFinite) &&
+    entry > 0 &&
+    stopLoss > 0 &&
+    target > 0 &&
+    input.estimatedCharges >= 0 &&
+    (input.slippageAllowance === undefined ||
+      (Number.isFinite(input.slippageAllowance) &&
+        input.slippageAllowance >= 0)) &&
+    (input.availableCapital === undefined ||
+      (Number.isFinite(input.availableCapital) &&
+        input.availableCapital >= 0)) &&
+    Number.isInteger(lot) &&
+    lot > 0;
   const riskPerShare =
     input.side === 'BUY' ? entry - stopLoss : stopLoss - entry;
-
-  const rewardPerShare =
-    input.side === 'BUY' ? target - entry : entry - target;
-
-  const safeRiskPerShare = Math.max(riskPerShare, 0);
-  const safeRewardPerShare = Math.max(rewardPerShare, 0);
-
-  const suggestedQuantity =
-    safeRiskPerShare > 0 && maxRiskAmount > 0
-      ? Math.floor(maxRiskAmount / safeRiskPerShare)
+  const rewardPerShare = input.side === 'BUY' ? target - entry : entry - target;
+  const safeRiskPerShare = Math.max(riskPerShare, 0),
+    safeRewardPerShare = Math.max(rewardPerShare, 0);
+  const byRisk =
+    safeRiskPerShare > 0
+      ? Math.max(
+          0,
+          Math.floor((maxRiskAmount - estimatedCharges) / safeRiskPerShare)
+        )
       : 0;
-
+  // Reserve all estimated costs in cash too; this is a cash-equity sizing model.
+  const byCash =
+    entry > 0
+      ? Math.max(0, Math.floor((availableCapital - estimatedCharges) / entry))
+      : 0;
+  const suggestedQuantity =
+    valid && safeRewardPerShare > 0
+      ? Math.floor(Math.min(byRisk, byCash) / lot) * lot
+      : 0;
   const grossProfitAtTarget = suggestedQuantity * safeRewardPerShare;
   const grossLossAtStop = suggestedQuantity * safeRiskPerShare;
-
-  const netProfitAtTarget = grossProfitAtTarget - estimatedCharges;
-  const netLossAtStop = grossLossAtStop + estimatedCharges;
-
+  const netProfitAtTarget = suggestedQuantity
+    ? grossProfitAtTarget - estimatedCharges
+    : 0;
+  const netLossAtStop = suggestedQuantity
+    ? grossLossAtStop + estimatedCharges
+    : 0;
   const grossRiskReward =
     safeRiskPerShare > 0 ? safeRewardPerShare / safeRiskPerShare : 0;
-
   const netRiskReward =
     netLossAtStop > 0 ? netProfitAtTarget / netLossAtStop : 0;
-
   const warnings: string[] = [];
+  if (!valid)
+    warnings.push(
+      'Enter finite positive prices, whole lots and non-negative costs/capital.'
+    );
+  if (estimatedCharges >= maxRiskAmount)
+    warnings.push('Costs consume the entire risk budget.');
+  if (byCash < byRisk)
+    warnings.push('Quantity limited by available cash; no leverage assumed.');
 
   if (safeRiskPerShare <= 0) {
     warnings.push('Invalid stop loss: risk per share is zero or negative');
@@ -91,25 +134,14 @@ export function calculatePositionSizing(
     warnings.push('Net risk-reward after charges is below 1:1');
   }
 
-  // Thresholds recalibrated to the range that is actually achievable under
-  // the current Target 1 = risk x 1.3 formula. Simulating netRiskReward
-  // across realistic risk-per-share values shows a theoretical ceiling of
-  // ~1.0909 (as risk/share -> 0) and realistic outcomes clustering between
-  // ~1.04 (very high-price stocks with coarse quantity rounding, e.g.
-  // risk/share=200 -> 1.044) and ~1.09 (most normal-priced stocks, e.g.
-  // risk/share=6.44 -> 1.0893). The old thresholds (WEAK < 1.2,
-  // ACCEPTABLE < 1.5, GOOD >= 1.5) sat entirely above this ceiling, so
-  // every signal ever generated was permanently mislabeled WEAK regardless
-  // of technical quality. See bug report 2026-07-10.
-  let quality: PositionSizingResult['quality'] = 'GOOD';
-
-  if (netRiskReward < 1 || netProfitAtTarget <= 0) {
-    quality = 'AVOID';
-  } else if (netRiskReward < 1.04) {
-    quality = 'WEAK';
-  } else if (netRiskReward < 1.075) {
-    quality = 'ACCEPTABLE';
-  }
+  const quality: PositionSizingResult['quality'] =
+    suggestedQuantity <= 0 || netRiskReward < 1
+      ? 'AVOID'
+      : netRiskReward < 1.2
+        ? 'WEAK'
+        : netRiskReward < 1.5
+          ? 'ACCEPTABLE'
+          : 'GOOD';
 
   return {
     riskPerShare: round2(safeRiskPerShare),

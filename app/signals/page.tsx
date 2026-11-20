@@ -1,1259 +1,69 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Brain,
-  RefreshCw,
-  ShieldAlert,
-  Sparkles,
-  Target,
-  TrendingDown,
-  TrendingUp,
-  Radar,
-  Trash2,
-  CheckCircle2,
-} from 'lucide-react';
+import Link from 'next/link';
+import { useEffect, useMemo, useState } from 'react';
 import { useApp } from '@/contexts/AppContext';
-import { generateSignals, TradeSignal } from '@/lib/signalEngine';
-import { useAlerts } from '@/contexts/AlertContext';
+import { INSTRUMENTS } from '@/lib/instruments';
 import {
-  isFreshSignalWindowOpenIST,
-  isMarketCloseSquareOffTimeIST,
-  minutesSinceISO,
-} from '@/lib/marketHours';
-import { calculatePositionSizing } from '@/lib/positionSizing';
+  findPaperSetup,
+  PaperSetup,
+  STRATEGY_VERSION,
+} from '@/lib/paperStrategy';
 import {
-  analyzeTargetExit,
-  getTargetExitActionLabel,
-} from '@/lib/targetExitAssistant';
+  closePaperPosition,
+  ExitReason,
+  isClosed,
+  openPaperPosition,
+  paperAccount,
+  PAPER_BOOK_KEY,
+  paperStats,
+  PaperPosition,
+  positionPL,
+  previewPaperEntry,
+} from '@/lib/paperBook';
+import { getIndianMarketStatus, istDateKey } from '@/lib/marketHours';
+import { analyzeMarketCondition } from '@/lib/marketCondition';
+import { quoteProblem } from '@/lib/marketDataQuality';
+import { usePaperBook } from '@/hooks/usePaperBook';
+import NewsContext from '@/components/NewsContext';
 
-
-const NEWS_SENTIMENT_CLIENT_CACHE_TTL_MS = 10 * 60 * 1000;
-
-type CachedClientFetchPayload = {
-  body: string;
-  status: number;
-  statusText: string;
-  headers: [string, string][];
-};
-
-type CachedClientFetchEntry = {
-  expiresAt: number;
-  payload?: CachedClientFetchPayload;
-  promise?: Promise<CachedClientFetchPayload>;
-};
-
-const newsSentimentClientCache = new Map<string, CachedClientFetchEntry>();
-
-function buildCachedResponse(payload: CachedClientFetchPayload): Response {
-  const body = [204, 205, 304].includes(payload.status) ? null : payload.body;
-
-  return new Response(body, {
-    status: payload.status,
-    statusText: payload.statusText,
-    headers: payload.headers,
-  });
+const money = (value: number) => `₹${value.toFixed(2)}`;
+const card = 'rounded-2xl border border-slate-800 bg-slate-900/60 p-4';
+const input =
+  'mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white';
+const button =
+  'rounded-xl bg-teal-600 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40';
+function download(name: string, text: string, type: string) {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = name;
+  anchor.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
-
-async function cachedClientFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const url =
-    typeof input === 'string'
-      ? input
-      : input instanceof URL
-        ? input.toString()
-        : input.url;
-
-  const method = (init?.method || 'GET').toUpperCase();
-  const shouldDedupe =
-    url.includes('/api/news') || url.includes('/api/hf/sentiment');
-
-  if (!shouldDedupe) {
-    return fetch(input, init);
-  }
-
-  const bodyKey =
-    typeof init?.body === 'string'
-      ? init.body
-      : init?.body
-        ? '[non-string-body]'
-        : '';
-
-  const cacheKey = `${method}:${url}:${bodyKey}`;
-  const now = Date.now();
-  const cached = newsSentimentClientCache.get(cacheKey);
-
-  if (cached && cached.expiresAt > now) {
-    if (cached.payload) {
-      return buildCachedResponse(cached.payload);
-    }
-
-    if (cached.promise) {
-      return buildCachedResponse(await cached.promise);
-    }
-  }
-
-  const promise = fetch(input, init)
-    .then(async (response) => {
-      const payload: CachedClientFetchPayload = {
-        body: await response.clone().text(),
-        status: response.status,
-        statusText: response.statusText,
-        headers: Array.from(response.headers.entries()),
-      };
-
-      if (response.ok) {
-        newsSentimentClientCache.set(cacheKey, {
-          expiresAt: Date.now() + NEWS_SENTIMENT_CLIENT_CACHE_TTL_MS,
-          payload,
-        });
-      } else {
-        newsSentimentClientCache.delete(cacheKey);
-      }
-
-      return payload;
-    })
-    .catch((error) => {
-      newsSentimentClientCache.delete(cacheKey);
-      throw error;
-    });
-
-  newsSentimentClientCache.set(cacheKey, {
-    expiresAt: now + NEWS_SENTIMENT_CLIENT_CACHE_TTL_MS,
-    promise,
-  });
-
-  return buildCachedResponse(await promise);
-}
-
-type AISentiment = {
-  label: 'positive' | 'negative' | 'neutral';
-  confidence: number;
-  signalScore: number;
-  isFallback?: boolean;
-  sentimentError?: string;
-};
-
-type NewsItem = {
-  title: string;
-  link: string;
-  source?: string;
-  publishedAt?: string;
-};
-
-type SignalLifecycleStatus =
-  | 'WAITING'
-  | 'TRIGGERED'
-  | 'BREAKEVEN_SUGGESTED'
-  | 'TRAIL_SL_SUGGESTED'
-  | 'TIME_EXIT_SUGGESTED'
-  | 'TARGET_1_HIT'
-  | 'TARGET_2_HIT'
-  | 'STOP_LOSS_HIT'
-  | 'MANUAL_EXIT'
-  | 'EXPIRED';
-
-type TrackedSignal = TradeSignal & {
-  id: string;
-  createdAt: string;
-  lifecycleStatus: SignalLifecycleStatus;
-  lastCheckedAt?: string;
-  sentiment?: AISentiment;
-  news?: NewsItem[];
-  savedToJournal?: boolean;
-};
-
-const TRACKED_SIGNALS_KEY = 'tracked_signals_v1';
-const SIGNAL_EXPIRY_MINUTES = 20;
-import { evaluateTradeability } from '@/lib/tradeabilityGate';
-import { getISTMinutes } from '@/lib/marketHours';
-import { analyzeMarketCondition, type MarketCondition } from "@/lib/marketCondition";
-
-// Real risk you actually size and trade with — drives Suggested Qty,
-// Gross/Net Profit, and the Quality label shown to you.
-const DEFAULT_MAX_RISK_PER_TRADE = 500;
-const DEFAULT_ESTIMATED_CHARGES = 50;
-
-function formatPrice(value: number) {
-  if (!value) return '--';
-  return `₹${value.toFixed(2)}`;
-}
-
-function formatPercent(value: number) {
-  return `${Math.round(value)}%`;
-}
-
-function formatMoneyValue(value: number) {
-  const sign = value < 0 ? '-' : '';
-  return `${sign}₹${Math.abs(value).toFixed(2)}`;
-}
-
-function createId() {
-  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-    return crypto.randomUUID();
-  }
-
-  return Date.now().toString(36) + Math.random().toString(36).slice(2);
-}
-
-function isTerminalStatus(status: SignalLifecycleStatus) {
-  return (
-    status === 'TARGET_2_HIT' ||
-    status === 'STOP_LOSS_HIT' ||
-    status === 'MANUAL_EXIT' ||
-    status === 'EXPIRED'
-  );
-}
-
-function getStatusLabel(status: SignalLifecycleStatus) {
-  const labels: Record<SignalLifecycleStatus, string> = {
-    WAITING: 'Waiting',
-    TRIGGERED: 'Triggered',
-    BREAKEVEN_SUGGESTED: 'Move SL to Cost',
-    TRAIL_SL_SUGGESTED: 'Trail SL Suggested',
-    TIME_EXIT_SUGGESTED: 'Time Exit Suggested',
-    TARGET_1_HIT: 'Target 1 Hit',
-    TARGET_2_HIT: 'Target 2 Hit',
-    STOP_LOSS_HIT: 'Stop Loss Hit',
-    MANUAL_EXIT: 'Manual Exit',
-    EXPIRED: 'Expired',
-  };
-
-  return labels[status];
-}
-
-function getStatusClass(status: SignalLifecycleStatus) {
-  if (status === 'TARGET_1_HIT' || status === 'TARGET_2_HIT') {
-    return 'bg-green-500/15 text-green-400 border-green-500/30';
-  }
-
-  if (status === 'STOP_LOSS_HIT') {
-    return 'bg-red-500/15 text-red-400 border-red-500/30';
-  }
-
-  if (status === 'TRIGGERED') {
-    return 'bg-blue-500/15 text-blue-400 border-blue-500/30';
-  }
-
-  if (
-    status === 'BREAKEVEN_SUGGESTED' ||
-    status === 'TRAIL_SL_SUGGESTED'
-  ) {
-    return 'bg-purple-500/15 text-purple-300 border-purple-500/30';
-  }
-
-  if (status === 'TIME_EXIT_SUGGESTED') {
-    return 'bg-orange-500/15 text-orange-300 border-orange-500/30';
-  }
-
-  if (status === 'MANUAL_EXIT') {
-    return 'bg-slate-600 text-slate-200 border-slate-500';
-  }
-
-  if (status === 'WAITING') {
-    return 'bg-yellow-500/15 text-yellow-300 border-yellow-500/30';
-  }
-
-  return 'bg-slate-700 text-slate-300 border-slate-600';
-}
-
-function canSaveStatusToJournal(status: SignalLifecycleStatus) {
-  return (
-    status === 'TARGET_2_HIT' ||
-    status === 'STOP_LOSS_HIT'
-  );
-}
-
-function getExitPriceForJournal(signal: TrackedSignal) {
-  if (signal.lifecycleStatus === 'TARGET_1_HIT') {
-    return signal.target1;
-  }
-
-  if (signal.lifecycleStatus === 'TARGET_2_HIT') {
-    return signal.target2;
-  }
-
-  if (signal.lifecycleStatus === 'STOP_LOSS_HIT') {
-    return signal.stopLoss;
-  }
-
-  return null;
-}
-
-function calculateLifecycleStatus(
-  signal: TrackedSignal,
-  currentPrice: number
-): SignalLifecycleStatus {
-  if (isTerminalStatus(signal.lifecycleStatus)) {
-    return signal.lifecycleStatus;
-  }
-
-  /**
-   * Important:
-   * EXPIRED should only apply before entry is triggered.
-   * Once a trade is triggered, it must be managed by SL/targets/manual exit,
-   * not by signal expiry.
-   */
-  const wasTriggered =
-    signal.lifecycleStatus === 'TRIGGERED' ||
-    signal.lifecycleStatus === 'TARGET_1_HIT';
-
-  /**
-   * Only WAITING signals can expire.
-   * If entry was not triggered within expiry time, do not take the trade.
-   */
-  if (
-    signal.lifecycleStatus === 'WAITING' &&
-    (minutesSinceISO(signal.createdAt) >= SIGNAL_EXPIRY_MINUTES ||
-      isMarketCloseSquareOffTimeIST())
-  ) {
-    return 'EXPIRED';
-  }
-
-  if (!currentPrice) {
-    return signal.lifecycleStatus;
-  }
-
-  if (signal.side === 'BUY') {
-    if (currentPrice >= signal.target2) {
-      return 'TARGET_2_HIT';
-    }
-
-    if (currentPrice >= signal.target1) {
-      return 'TARGET_1_HIT';
-    }
-
-    if (currentPrice <= signal.stopLoss) {
-      return 'STOP_LOSS_HIT';
-    }
-
-    if (currentPrice >= signal.entry) {
-      return 'TRIGGERED';
-    }
-
-    /**
-     * If trade was already triggered and price comes back below entry,
-     * keep it as TRIGGERED until SL/target/manual exit.
-     */
-    if (wasTriggered) {
-      return 'TRIGGERED';
-    }
-
-    return 'WAITING';
-  }
-
-  if (signal.side === 'SELL') {
-    if (currentPrice <= signal.target2) {
-      return 'TARGET_2_HIT';
-    }
-
-    if (currentPrice <= signal.target1) {
-      return 'TARGET_1_HIT';
-    }
-
-    if (currentPrice >= signal.stopLoss) {
-      return 'STOP_LOSS_HIT';
-    }
-
-    if (currentPrice <= signal.entry) {
-      return 'TRIGGERED';
-    }
-
-    /**
-     * If trade was already triggered and price comes back above entry,
-     * keep it as TRIGGERED until SL/target/manual exit.
-     */
-    if (wasTriggered) {
-      return 'TRIGGERED';
-    }
-
-    return 'WAITING';
-  }
-
-  return 'WAITING';
-}
-
-function getFallbackSentiment(signal: TradeSignal, error?: string): AISentiment {
-  // Hugging Face sentiment could not be reached or parsed. Do NOT fabricate
-  // a positive/negative reading by echoing the technical signal direction --
-  // that previously rendered as fake independent news corroboration and
-  // could mask genuinely bearish headlines. Report neutral + isFallback so
-  // the UI can flag this as "AI unavailable" instead of a real analysis.
-  // If an error is provided, include it so the UI can show diagnostics.
-  return {
-    label: 'neutral',
-    confidence: 0,
-    signalScore: calculateSignalScore(signal, 'neutral', 0),
-    isFallback: true,
-    sentimentError: error,
-  };
-}
-
-function buildSentimentText(signal: TradeSignal) {
-  const reasons = signal.reasons.join('. ');
-
-  if (signal.side === 'BUY') {
-    return `${signal.symbol} shows a positive intraday technical setup. ${reasons}. Price action appears bullish with possible upside momentum.`;
-  }
-
-  if (signal.side === 'SELL') {
-    return `${signal.symbol} shows a negative intraday technical setup. ${reasons}. Price action appears bearish with possible downside pressure.`;
-  }
-
-  return `${signal.symbol} has no clear intraday trading setup currently. ${reasons}. Market signal is neutral and uncertain.`;
-}
-
-function buildNewsSentimentText(signal: TradeSignal, news: NewsItem[]) {
-  if (!news.length) {
-    return buildSentimentText(signal);
-  }
-
-  const headlines = news.map((item) => item.title).join('. ');
-
-  return `
-Stock: ${signal.symbol}
-Technical Signal: ${signal.side}
-Signal Strength: ${signal.strength}
-Signal Reasons: ${signal.reasons.join('. ')}
-
-Latest News Headlines:
-${headlines}
-
-Analyze the financial sentiment of these headlines for intraday stock tracking.
-`;
-}
-
-function calculateSignalScore(
-  signal: TradeSignal,
-  label: string,
-  confidence: number
-) {
-  let baseScore = 40;
-
-  if (signal.side === 'BUY' || signal.side === 'SELL') {
-    baseScore = signal.strength === 'STRONG' ? 70 : 60;
-  }
-
-  if (signal.side === 'BUY' && label === 'positive') {
-    baseScore += 15;
-  }
-
-  if (signal.side === 'SELL' && label === 'negative') {
-    baseScore += 15;
-  }
-
-  if (label === 'neutral') {
-    baseScore -= 5;
-  }
-
-  if (signal.riskReward >= 1) {
-    baseScore += 5;
-  }
-
-  if (confidence >= 90) {
-    baseScore += 5;
-  }
-
-  return Math.max(0, Math.min(100, Math.round(baseScore)));
-}
-
-function SentimentBox({
-  sentiment,
-  loading,
+function Field({
+  label,
+  value,
+  setValue,
+  step = '0.01',
 }: {
-  sentiment?: AISentiment;
-  loading: boolean;
-}) {
-  if (loading) {
-    return (
-      <div className="mt-4 rounded-2xl border border-purple-500/20 bg-purple-500/10 p-4">
-        <div className="flex items-center gap-2 text-purple-300">
-          <Brain className="h-4 w-4 animate-pulse" />
-          <span className="text-sm font-semibold">AI is analyzing news...</span>
-        </div>
-      </div>
-    );
-  }
-
-  if (!sentiment) {
-    return null;
-  }
-
-  if (sentiment.isFallback) {
-    let errorExplanation = 'Hugging Face sentiment could not be reached.';
-    if (sentiment.sentimentError) {
-      if (sentiment.sentimentError.includes('HUGGINGFACE_API_KEY')) {
-        errorExplanation =
-          'Hugging Face API key not configured. Set HUGGINGFACE_API_KEY in .env.local to enable sentiment analysis.';
-      } else if (
-        sentiment.sentimentError.includes('rate') ||
-        sentiment.sentimentError.includes('429') ||
-        sentiment.sentimentError.includes('503')
-      ) {
-        errorExplanation =
-          'Hugging Face is rate-limited or temporarily unavailable. Sentiment analysis will resume when service recovers.';
-      } else if (sentiment.sentimentError.includes('non-JSON')) {
-        errorExplanation =
-          'Hugging Face returned an invalid response. This may indicate a service issue.';
-      } else {
-        errorExplanation = `Sentiment error: ${sentiment.sentimentError}`;
-      }
-    }
-
-    return (
-      <div className="mt-4 rounded-2xl border border-slate-500/30 bg-slate-500/10 p-4">
-        <div className="flex items-center gap-2 text-slate-400">
-          <Sparkles className="h-4 w-4" />
-          <span className="text-sm font-semibold">
-            AI analysis unavailable — showing technicals only
-          </span>
-        </div>
-        <p className="mt-1 text-xs text-slate-500">{errorExplanation}</p>
-        <p className="mt-1 text-xs text-slate-500">
-          Rely on the news headlines below and price-action reasons directly.
-        </p>
-      </div>
-    );
-  }
-
-  const isPositive = sentiment.label === 'positive';
-  const isNegative = sentiment.label === 'negative';
-
-  const sentimentClass = isPositive
-    ? 'text-green-400'
-    : isNegative
-    ? 'text-red-400'
-    : 'text-slate-300';
-
-  const scoreClass =
-    sentiment.signalScore >= 75
-      ? 'text-green-400'
-      : sentiment.signalScore >= 55
-      ? 'text-yellow-400'
-      : 'text-red-400';
-
-  return (
-    <div className="mt-4 rounded-2xl border border-purple-500/20 bg-purple-500/10 p-4">
-      <div className="mb-3 flex items-center gap-2 text-purple-300">
-        <Sparkles className="h-4 w-4" />
-        <span className="text-sm font-semibold">Hugging Face AI Analysis</span>
-      </div>
-
-      <div className="grid grid-cols-3 gap-3 text-sm">
-        <div>
-          <p className="text-slate-500">News Sentiment</p>
-          <p className={`font-bold capitalize ${sentimentClass}`}>
-            {sentiment.label}
-          </p>
-        </div>
-
-        <div>
-          <p className="text-slate-500">AI Confidence</p>
-          <p className="font-bold text-white">
-            {formatPercent(sentiment.confidence)}
-          </p>
-        </div>
-
-        <div>
-          <p className="text-slate-500">Signal Score</p>
-          <p className={`font-bold ${scoreClass}`}>
-            {sentiment.signalScore}/100
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function NewsBox({ news }: { news: NewsItem[] }) {
-  if (!news.length) {
-    return (
-      <div className="mt-4 rounded-2xl border border-slate-700 bg-black/30 p-4">
-        <p className="text-sm text-slate-400">
-          No latest news headlines found for this stock.
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="mt-4 rounded-2xl border border-slate-700 bg-black/30 p-4">
-      <p className="mb-3 text-sm font-semibold text-slate-300">
-        Latest News Headlines
-      </p>
-
-      <ul className="space-y-2">
-        {news.slice(0, 3).map((item, index) => (
-          <li key={index} className="text-sm text-slate-400">
-            • {item.title}
-            {item.source && (
-              <span className="ml-1 text-xs text-slate-600">
-                — {item.source}
-              </span>
-            )}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-function PositionSizingBox({ signal }: { signal: TradeSignal }) {
-  if (signal.side !== 'BUY' && signal.side !== 'SELL') {
-    return null;
-  }
-
-  const sizing = calculatePositionSizing({
-    side: signal.side,
-    entry: signal.entry,
-    stopLoss: signal.stopLoss,
-    target: signal.target1,
-    maxRiskAmount: DEFAULT_MAX_RISK_PER_TRADE,
-    estimatedCharges: DEFAULT_ESTIMATED_CHARGES,
-  });
-
-  const qualityClass =
-    sizing.quality === 'GOOD'
-      ? 'text-green-400'
-      : sizing.quality === 'ACCEPTABLE'
-      ? 'text-yellow-300'
-      : sizing.quality === 'WEAK'
-      ? 'text-orange-300'
-      : 'text-red-400';
-
-  return (
-    <div className="mt-4 rounded-2xl border border-cyan-500/20 bg-cyan-500/10 p-4">
-      <div className="mb-3 flex items-center gap-2 text-cyan-300">
-        <Target className="h-4 w-4" />
-        <span className="text-sm font-semibold">
-          Position Size & Net R:R Assistant
-        </span>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3 text-sm">
-        <div>
-          <p className="text-slate-500">Max Risk</p>
-          <p className="font-bold text-white">
-            {formatMoneyValue(DEFAULT_MAX_RISK_PER_TRADE)}
-          </p>
-        </div>
-
-        <div>
-          <p className="text-slate-500">Suggested Qty</p>
-          <p className="font-bold text-white">{sizing.suggestedQuantity}</p>
-        </div>
-
-        <div>
-          <p className="text-slate-500">Gross Target Profit</p>
-          <p className="font-bold text-green-400">
-            {formatMoneyValue(sizing.grossProfitAtTarget)}
-          </p>
-        </div>
-
-        <div>
-          <p className="text-slate-500">Gross SL Loss</p>
-          <p className="font-bold text-red-400">
-            {formatMoneyValue(sizing.grossLossAtStop)}
-          </p>
-        </div>
-
-        <div>
-          <p className="text-slate-500">Est. Charges</p>
-          <p className="font-bold text-yellow-300">
-            {formatMoneyValue(sizing.estimatedCharges)}
-          </p>
-        </div>
-
-        <div>
-          <p className="text-slate-500">Net R:R</p>
-          <p className={`font-bold ${qualityClass}`}>
-            1:{sizing.netRiskReward}
-          </p>
-        </div>
-
-        <div>
-          <p className="text-slate-500">Net Target Profit</p>
-          <p className="font-bold text-green-400">
-            {formatMoneyValue(sizing.netProfitAtTarget)}
-          </p>
-        </div>
-
-        <div>
-          <p className="text-slate-500">Net SL Loss</p>
-          <p className="font-bold text-red-400">
-            {formatMoneyValue(sizing.netLossAtStop)}
-          </p>
-        </div>
-      </div>
-
-      <div className="mt-3 rounded-xl bg-black/20 p-3">
-        <p className={`text-sm font-bold ${qualityClass}`}>
-          Quality: {sizing.quality}
-        </p>
-
-        {(sizing.quality === 'WEAK' || sizing.quality === 'AVOID') && (
-          <div className="mt-2 rounded-lg bg-black/20 p-2 text-xs text-slate-400">
-            <p className="font-semibold text-slate-300">Why Watch Only:</p>
-            <ul className="mt-1 space-y-1">
-              <li>• Quality is {sizing.quality}</li>
-              <li>• Net R:R {sizing.netRiskReward} is in the {sizing.quality} range</li>
-              <li>
-                • Est. charges (₹{sizing.estimatedCharges}) reduce reward
-                significantly relative to target
-              </li>
-              {signal.reasons
-                .filter((r) => r.toLowerCase().includes('opposes'))
-                .map((r, index) => (
-                  <li key={index}>• {r}</li>
-                ))}
-            </ul>
-          </div>
-        )}
-
-        {(() => {
-          // Gate must evaluate the SAME real-money sizing shown to the user
-          // above (DEFAULT_MAX_RISK_PER_TRADE), not a hypothetical larger
-          // position. Using a bigger risk budget dilutes the fixed
-          // estimatedCharges and makes net R:R look better than it really
-          // is at real trade size, which was letting WEAK-quality, sub
-          // threshold setups render as TRADABLE. See bug report 2026-07-07.
-          const gate = evaluateTradeability({
-            quality: sizing.quality,
-            strength: signal.strength,
-            netRiskReward: sizing.netRiskReward,
-          });
-
-          const gateClass =
-            gate.status === 'TRADABLE'
-              ? 'border-green-500/40 bg-green-500/15 text-green-300'
-              : 'border-red-500/40 bg-red-500/15 text-red-300';
-
-          return (
-            <div className={`mt-3 rounded-lg border p-3 ${gateClass}`}>
-              <p className="text-sm font-bold">
-                {gate.status === 'TRADABLE'
-                  ? 'TRADABLE'
-                  : 'WATCH ONLY — DO NOT ENTER'}
-              </p>
-
-              {gate.reasons.length > 0 && (
-                <ul className="mt-2 space-y-1 text-xs">
-                  {gate.reasons.map((reason, index) => (
-                    <li key={index}>• {reason}</li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          );
-        })()}
-
-        {sizing.warnings.length > 0 && (
-          <ul className="mt-2 space-y-1 text-xs text-yellow-200">
-            {sizing.warnings.slice(0, 3).map((warning, index) => (
-              <li key={index}>• {warning}</li>
-            ))}
-          </ul>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function TradeExitAssistantBox({
-  signal,
-  currentPrice,
-  lifecycleStatus,
-}: {
-  signal: TradeSignal;
-  currentPrice: number;
-  lifecycleStatus?: SignalLifecycleStatus;
-}) {
-  const { candles } = useApp();
-
-  if (signal.side !== 'BUY' && signal.side !== 'SELL') {
-    return null;
-  }
-
-  if (!currentPrice) {
-    return null;
-  }
-
-  const risk =
-    signal.riskPerShare ||
-    Math.abs(Number(signal.entry || 0) - Number(signal.stopLoss || 0));
-
-  if (!risk) {
-    return null;
-  }
-
-  const profitPerShare =
-    signal.side === 'BUY'
-      ? currentPrice - signal.entry
-      : signal.entry - currentPrice;
-
-  const currentR = profitPerShare / risk;
-
-  const isStoppedOut = lifecycleStatus === 'STOP_LOSS_HIT';
-
-  // Once stopped out, freeze R/P&L to the realized outcome at the stop loss
-  // price instead of continuing to compute against live current price.
-  const realizedProfitPerShare =
-    signal.side === 'BUY'
-      ? signal.stopLoss - signal.entry
-      : signal.entry - signal.stopLoss;
-
-  const realizedR = risk ? realizedProfitPerShare / risk : -1;
-
-  const displayR = isStoppedOut ? realizedR : currentR;
-  const displayProfitPerShare = isStoppedOut
-    ? realizedProfitPerShare
-    : profitPerShare;
-
-  const targetExit = analyzeTargetExit({
-    signal,
-    currentPrice,
-    candles: candles[signal.symbol] || [],
-  });
-
-  let message = 'Manage trade using stop loss, target, and manual exit rules.';
-  let messageClass = 'text-slate-300';
-
-  if (lifecycleStatus === 'WAITING') {
-    message = 'Entry not triggered yet. Do not enter if signal expires.';
-    messageClass = 'text-yellow-300';
-  } else if (lifecycleStatus === 'EXPIRED') {
-    message = 'Signal expired before entry. Avoid fresh entry.';
-    messageClass = 'text-red-300';
-  } else if (isStoppedOut) {
-    message =
-      'Trade closed at stop loss. Do not average or re-enter without a fresh signal.';
-    messageClass = 'text-red-300';
-  } else if (currentR < 0) {
-    message =
-      'Trade is below entry. Do not average. Respect SL or consider manual exit if setup weakens.';
-    messageClass = 'text-red-300';
-  } else if (targetExit?.suggestedAction === 'EXIT_REMAINING') {
-    message =
-      'High reversal risk near/after Target 1. Consider exiting remaining quantity.';
-    messageClass = 'text-red-300';
-  } else if (targetExit?.suggestedAction === 'BOOK_PARTIAL') {
-    message =
-      'Price is near Target 1 with reversal risk. Consider booking partial profit.';
-    messageClass = 'text-yellow-300';
-  } else if (targetExit?.suggestedAction === 'TRAIL_SL') {
-    message =
-      'Target 1 is hit with continuation support. Trail SL and hold remaining only while trend holds.';
-    messageClass = 'text-purple-300';
-  } else if (currentR >= 1) {
-    message =
-      'Trade has reached 1R+ zone. Consider trailing SL or booking partial profit.';
-    messageClass = 'text-purple-300';
-  } else if (currentR >= 0.7) {
-    message =
-      'Trade has reached 0.7R zone. Consider moving SL near breakeven.';
-    messageClass = 'text-cyan-300';
-  }
-
-  const reversalClass =
-    targetExit?.reversalRisk === 'HIGH'
-      ? 'text-red-300'
-      : targetExit?.reversalRisk === 'MEDIUM'
-        ? 'text-yellow-300'
-        : 'text-green-300';
-
-  const confidenceClass =
-    targetExit?.holdToTarget2Confidence === 'HIGH'
-      ? 'text-green-300'
-      : targetExit?.holdToTarget2Confidence === 'MEDIUM'
-        ? 'text-yellow-300'
-        : 'text-red-300';
-
-  const actionClass =
-    targetExit?.suggestedAction === 'EXIT_REMAINING'
-      ? 'border-red-500/30 bg-red-500/15 text-red-200'
-      : targetExit?.suggestedAction === 'BOOK_PARTIAL'
-        ? 'border-yellow-500/30 bg-yellow-500/15 text-yellow-200'
-        : targetExit?.suggestedAction === 'TRAIL_SL'
-          ? 'border-purple-500/30 bg-purple-500/15 text-purple-200'
-          : targetExit?.suggestedAction === 'MOVE_SL_TO_COST'
-            ? 'border-cyan-500/30 bg-cyan-500/15 text-cyan-200'
-            : 'border-green-500/30 bg-green-500/15 text-green-200';
-
-  return (
-    <div className="mt-4 rounded-2xl border border-orange-500/20 bg-orange-500/10 p-4">
-      <p className="text-sm font-semibold text-orange-300">
-        Trade Exit Assistant
-      </p>
-
-      <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
-        <div>
-          <p className="text-slate-500">
-            {isStoppedOut ? 'Realized R' : 'Current R'}
-          </p>
-          <p className={displayR >= 0 ? 'font-bold text-green-400' : 'font-bold text-red-400'}>
-            {displayR.toFixed(2)}R
-          </p>
-        </div>
-
-        <div>
-          <p className="text-slate-500">
-            {isStoppedOut ? 'Realized P/L per share' : 'Current P/L per share'}
-          </p>
-          <p className={displayProfitPerShare >= 0 ? 'font-bold text-green-400' : 'font-bold text-red-400'}>
-            {formatMoneyValue(displayProfitPerShare)}
-          </p>
-        </div>
-      </div>
-
-      <p className={`mt-3 text-sm ${messageClass}`}>{message}</p>
-
-      {targetExit && !isStoppedOut && (
-        <div className="mt-4 rounded-2xl border border-slate-700 bg-black/30 p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold text-orange-200">
-                Target Exit Assistant
-              </p>
-              <p className="mt-1 text-xs text-slate-400">
-                Helps decide whether to book, trail, or hold for Target 2.
-              </p>
-            </div>
-
-            <span className={`rounded-full border px-3 py-1 text-xs font-bold ${actionClass}`}>
-              {getTargetExitActionLabel(targetExit.suggestedAction)}
-            </span>
-          </div>
-
-          <div className="mt-3 grid grid-cols-3 gap-3 text-sm">
-            <div>
-              <p className="text-slate-500">Progress to T1</p>
-              <p className="font-bold text-white">
-                {targetExit.targetProgressPercent.toFixed(0)}%
-              </p>
-            </div>
-
-            <div>
-              <p className="text-slate-500">Reversal Risk</p>
-              <p className={`font-bold ${reversalClass}`}>
-                {targetExit.reversalRisk}
-              </p>
-            </div>
-
-            <div>
-              <p className="text-slate-500">Hold to T2</p>
-              <p className={`font-bold ${confidenceClass}`}>
-                {targetExit.holdToTarget2Confidence}
-              </p>
-            </div>
-          </div>
-
-          {targetExit.reasons.length > 0 && (
-            <ul className="mt-3 space-y-1 text-xs text-slate-300">
-              {targetExit.reasons.map((reason, index) => (
-                <li key={index}>• {reason}</li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function TrackingBox({
-  status,
-  currentPrice,
-  lastCheckedAt,
-}: {
-  status: SignalLifecycleStatus;
-  currentPrice: number;
-  lastCheckedAt?: string;
+  label: string;
+  value: string;
+  setValue: (v: string) => void;
+  step?: string;
 }) {
   return (
-    <div className="mt-4 rounded-2xl border border-slate-700 bg-black/30 p-4">
-      <div className="mb-3 flex items-center gap-2 text-slate-300">
-        <Radar className="h-4 w-4" />
-        <span className="text-sm font-semibold">Tracking Status</span>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3 text-sm">
-        <div>
-          <p className="text-slate-500">Current Status</p>
-          <p
-            className={`mt-1 inline-flex rounded-full border px-3 py-1 text-xs font-bold ${getStatusClass(
-              status
-            )}`}
-          >
-            {getStatusLabel(status)}
-          </p>
-        </div>
-
-        <div>
-          <p className="text-slate-500">Current Price</p>
-          <p className="font-bold text-white">{formatPrice(currentPrice)}</p>
-        </div>
-      </div>
-
-      {lastCheckedAt && (
-        <p className="mt-3 text-xs text-slate-500">
-          Last checked: {new Date(lastCheckedAt).toLocaleTimeString()}
-        </p>
-      )}
-    </div>
-  );
-}
-
-function SignalCard({
-  signal,
-  sentiment,
-  loadingSentiment,
-  news,
-  onTrack,
-  isTracked,
-  lifecycleStatus,
-  currentPrice,
-  lastCheckedAt,
-  onRemoveTracked,
-  onSaveToJournal,
-  onManualExit,
-  savedToJournal,
-  canSaveToJournal,
-  canManualExit,
-}: {
-  signal: TradeSignal;
-  sentiment?: AISentiment;
-  loadingSentiment: boolean;
-  news: NewsItem[];
-  onTrack?: () => void;
-  isTracked?: boolean;
-  lifecycleStatus?: SignalLifecycleStatus;
-  currentPrice?: number;
-  lastCheckedAt?: string;
-  onRemoveTracked?: () => void;
-  onSaveToJournal?: () => void;
-  onManualExit?: () => void;
-  savedToJournal?: boolean;
-  canSaveToJournal?: boolean;
-  canManualExit?: boolean;
-}) {
-  const isBuy = signal.side === 'BUY';
-  const isSell = signal.side === 'SELL';
-  const isNeutral = signal.side === 'NEUTRAL';
-
-  const cardBorder = isBuy
-    ? 'border-green-500/30'
-    : isSell
-    ? 'border-red-500/30'
-    : 'border-slate-700';
-
-  const badgeClass = isBuy
-    ? 'bg-green-500/15 text-green-400'
-    : isSell
-    ? 'bg-red-500/15 text-red-400'
-    : 'bg-slate-700 text-slate-300';
-
-  return (
-    <div
-      className={`rounded-3xl border ${cardBorder} bg-[#15161b] p-5 shadow-lg`}
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h2 className="text-2xl font-bold text-white">{signal.symbol}</h2>
-          <p className="mt-1 text-sm text-slate-400">
-            Strategy: Intraday Price Action
-          </p>
-        </div>
-
-        <div
-          className={`rounded-full px-4 py-2 text-sm font-semibold ${badgeClass}`}
-        >
-          {signal.status.replaceAll('_', ' ')}
-        </div>
-      </div>
-
-      <div className="mt-5 flex items-center gap-3">
-        {isBuy && <TrendingUp className="h-6 w-6 text-green-400" />}
-        {isSell && <TrendingDown className="h-6 w-6 text-red-400" />}
-        {isNeutral && <ShieldAlert className="h-6 w-6 text-slate-400" />}
-
-        <div>
-          <p className="text-sm text-slate-400">Signal</p>
-          <p
-            className={
-              isBuy
-                ? 'text-xl font-bold text-green-400'
-                : isSell
-                ? 'text-xl font-bold text-red-400'
-                : 'text-xl font-bold text-slate-300'
-            }
-          >
-            {signal.side}
-          </p>
-        </div>
-
-        <div className="ml-auto text-right">
-          <p className="text-sm text-slate-400">Strength</p>
-          <p className="text-lg font-semibold text-white">{signal.strength}</p>
-        </div>
-      </div>
-
-      {lifecycleStatus && (
-        <TrackingBox
-          status={lifecycleStatus}
-          currentPrice={currentPrice || 0}
-          lastCheckedAt={lastCheckedAt}
-        />
-      )}
-
-      <SentimentBox sentiment={sentiment} loading={loadingSentiment} />
-
-      <NewsBox news={news} />
-
-      {!isNeutral && (
-        <div className="mt-5 grid grid-cols-2 gap-3">
-          <div className="rounded-2xl bg-black/30 p-4">
-            <p className="text-xs uppercase tracking-wide text-slate-500">
-              Entry
-            </p>
-            <p className="mt-1 text-lg font-bold text-white">
-              {formatPrice(signal.entry)}
-            </p>
-          </div>
-
-          <div className="rounded-2xl bg-black/30 p-4">
-            <p className="text-xs uppercase tracking-wide text-slate-500">
-              Stop Loss
-            </p>
-            <p className="mt-1 text-lg font-bold text-red-400">
-              {formatPrice(signal.stopLoss)}
-            </p>
-          </div>
-
-          <div className="rounded-2xl bg-black/30 p-4">
-            <p className="text-xs uppercase tracking-wide text-slate-500">
-              Target 1
-            </p>
-            <p className="mt-1 text-lg font-bold text-green-400">
-              {formatPrice(signal.target1)}
-            </p>
-          </div>
-
-          <div className="rounded-2xl bg-black/30 p-4">
-            <p className="text-xs uppercase tracking-wide text-slate-500">
-              Target 2
-            </p>
-            <p className="mt-1 text-lg font-bold text-green-400">
-              {formatPrice(signal.target2)}
-            </p>
-          </div>
-        </div>
-      )}
-
-      {!isNeutral && (
-        <div className="mt-4 rounded-2xl bg-black/30 p-4">
-          <div className="flex items-center gap-2 text-slate-300">
-            <Target className="h-4 w-4" />
-            <span className="text-sm font-medium">Risk Details</span>
-          </div>
-
-          <div className="mt-3 grid grid-cols-3 gap-2 text-sm">
-            <div>
-              <p className="text-slate-500">Risk/share</p>
-              <p className="font-semibold text-white">
-                {formatPrice(signal.riskPerShare)}
-              </p>
-            </div>
-
-            <div>
-              <p className="text-slate-500">Reward/share</p>
-              <p className="font-semibold text-white">
-                {formatPrice(signal.rewardPerShare)}
-              </p>
-            </div>
-
-            <div>
-              <p className="text-slate-500">R:R</p>
-              <p className="font-semibold text-white">1:{signal.riskReward}</p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {!isNeutral && <PositionSizingBox signal={signal} />}
-
-      {!isNeutral && (
-        <TradeExitAssistantBox
-          signal={signal}
-          currentPrice={currentPrice || signal.entry}
-          lifecycleStatus={lifecycleStatus}
-        />
-      )}
-
-      <div className="mt-5">
-        <p className="mb-2 text-sm font-semibold text-slate-300">Reasons</p>
-        <ul className="space-y-2">
-          {signal.reasons.map((reason, index) => (
-            <li key={index} className="text-sm text-slate-400">
-              • {reason}
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      {!isNeutral && onTrack && (
-        <button
-          onClick={onTrack}
-          disabled={isTracked}
-          className={`mt-5 flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 font-semibold ${
-            isTracked
-              ? 'cursor-not-allowed bg-slate-700 text-slate-400'
-              : 'bg-blue-600 text-white'
-          }`}
-        >
-          <Radar className="h-4 w-4" />
-          {isTracked ? 'Already Tracking' : 'Track Signal'}
-        </button>
-      )}
-
-      {canSaveToJournal && onSaveToJournal && (
-        <button
-          onClick={onSaveToJournal}
-          disabled={savedToJournal}
-          className={`mt-5 flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 font-semibold ${
-            savedToJournal
-              ? 'cursor-not-allowed bg-green-600/20 text-green-400'
-              : 'bg-green-600 text-white'
-          }`}
-        >
-          <CheckCircle2 className="h-4 w-4" />
-          {savedToJournal ? 'Saved to Journal' : 'Save to Journal'}
-        </button>
-      )}
-
-      {canManualExit && onManualExit && (
-        <button
-          onClick={onManualExit}
-          disabled={savedToJournal}
-          className={`mt-5 flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 font-semibold ${
-            savedToJournal
-              ? 'cursor-not-allowed bg-green-600/20 text-green-400'
-              : 'bg-orange-600 text-white'
-          }`}
-        >
-          <CheckCircle2 className="h-4 w-4" />
-          {savedToJournal ? 'Saved to Journal' : 'Save Manual Exit'}
-        </button>
-      )}
-
-      {onRemoveTracked && (
-        <button
-          onClick={onRemoveTracked}
-          className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl bg-red-600/20 px-4 py-3 font-semibold text-red-400"
-        >
-          <Trash2 className="h-4 w-4" />
-          Remove Tracking
-        </button>
-      )}
-    </div>
+    <label className="block text-sm text-slate-300">
+      {label}
+      <input
+        className={input}
+        type="number"
+        min="0"
+        step={step}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+      />
+    </label>
   );
 }
 
@@ -1265,788 +75,705 @@ export default function SignalsPage() {
     candleWarnings,
     updatePrices,
     updateCandles,
-    addTrade,
   } = useApp();
-  const { addAlert, requestBrowserPermission, browserPermission } = useAlerts();
-  const previousSignalStatusesRef = useRef<Record<string, string>>({});
-
-  const [mounted, setMounted] = useState(false);
-  const [sentiments, setSentiments] = useState<Record<string, AISentiment>>({});
-  const [loadingSentiment, setLoadingSentiment] = useState(false);
-  const [newsBySymbol, setNewsBySymbol] = useState<Record<string, NewsItem[]>>(
-    {}
-  );
-  const [trackedSignals, setTrackedSignals] = useState<TrackedSignal[]>([]);
-  const [hydratedTracking, setHydratedTracking] = useState(false);
-
-  const signals = useMemo(() => {
-    return generateSignals(watchlist, prices, candles);
-  }, [watchlist, prices, candles]);
-
-  const activeSignals = signals.filter((s) => s.side !== 'NEUTRAL');
-  const neutralSignals = signals.filter((s) => s.side === 'NEUTRAL');
-
-  const noTradeDayInfo = (() => {
-    const evaluated = activeSignals.map((signal) => {
-      // Same fix as PositionSizingBox: evaluate tradeability at real
-      // DEFAULT_MAX_RISK_PER_TRADE sizing, not GATE_QUALIFICATION_MAX_RISK.
-      const realSizing = calculatePositionSizing({
-        side: signal.side as 'BUY' | 'SELL',
-        entry: signal.entry,
-        stopLoss: signal.stopLoss,
-        target: signal.target1,
-        maxRiskAmount: DEFAULT_MAX_RISK_PER_TRADE,
-        estimatedCharges: DEFAULT_ESTIMATED_CHARGES,
-      });
-
-      return evaluateTradeability({
-        quality: realSizing.quality,
-        strength: signal.strength,
-        netRiskReward: realSizing.netRiskReward,
-      });
-    });
-
-    const total = evaluated.length;
-    const tradableCount = evaluated.filter((r) => r.status === 'TRADABLE').length;
-    const watchOnlyRatio = total > 0 ? (total - tradableCount) / total : 0;
-
-    const isBeforeMidMorning = getISTMinutes() < 10 * 60 + 45;
-    const mostlyWatchOnly = total > 0 && watchOnlyRatio >= 0.8;
-    const tooEarlyForCleanTrend = isBeforeMidMorning && tradableCount < 2;
-
-    let message = '';
-    if (mostlyWatchOnly) {
-      message =
-        'Most signals have poor Net R:R after charges. Avoid fresh entries; watch only.';
-    } else if (tooEarlyForCleanTrend) {
-      message =
-        'No clean trend yet. Fewer than 2 tradable signals so far this morning.';
-    }
-
-    return {
-      show: mostlyWatchOnly || tooEarlyForCleanTrend,
-      message,
-      tradableCount,
-      total,
-    };
-  })();
-
-  const activeTrackedSignals = trackedSignals.filter(
-    (signal) => !isTerminalStatus(signal.lifecycleStatus)
-  );
-
-  const completedTrackedSignals = trackedSignals.filter((signal) =>
-    isTerminalStatus(signal.lifecycleStatus)
-  );
-
+  const { book, ready, error: storageError, transact } = usePaperBook();
+  const [now, setNow] = useState<Date | null>(null),
+    [error, setError] = useState(''),
+    [message, setMessage] = useState(''),
+    [busy, setBusy] = useState(false);
+  const [charges, setCharges] = useState('15'),
+    [slippage, setSlippage] = useState('1'),
+    [notes, setNotes] = useState(''),
+    [reviewed, setReviewed] = useState(false);
+  const [legacyCount, setLegacyCount] = useState(0);
   useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  useEffect(() => {
+    setNow(new Date());
+    const timer = window.setInterval(() => setNow(new Date()), 5000);
     try {
-      const saved = localStorage.getItem(TRACKED_SIGNALS_KEY);
-
-      if (saved) {
-        setTrackedSignals(JSON.parse(saved));
-      }
+      const old = JSON.parse(
+        localStorage.getItem('tracked_signals_v1') || '[]'
+      );
+      setLegacyCount(Array.isArray(old) ? old.length : 0);
     } catch {
-      setTrackedSignals([]);
+      setLegacyCount(0);
     }
-
-    setHydratedTracking(true);
+    return () => window.clearInterval(timer);
   }, []);
-
-  useEffect(() => {
-    if (!hydratedTracking) return;
-
-    localStorage.setItem(TRACKED_SIGNALS_KEY, JSON.stringify(trackedSignals));
-  }, [trackedSignals, hydratedTracking]);
-
-  useEffect(() => {
-    if (!hydratedTracking || trackedSignals.length === 0) return;
-
-    setTrackedSignals((prev) =>
-      prev.map((signal) => {
-        const currentPrice = prices[signal.symbol]?.price || 0;
-        const nextStatus = calculateLifecycleStatus(signal, currentPrice);
-
-        if (nextStatus === signal.lifecycleStatus) {
-          return {
-            ...signal,
-            lastCheckedAt: new Date().toISOString(),
-          };
-        }
-
-        return {
-          ...signal,
-          lifecycleStatus: nextStatus,
-          lastCheckedAt: new Date().toISOString(),
-        };
-      })
-    );
-  }, [prices, hydratedTracking, trackedSignals.length]);
-
-  async function fetchNewsForSymbol(symbol: string): Promise<NewsItem[]> {
+  const symbols = watchlist
+    .filter(
+      (symbol) =>
+        INSTRUMENTS[symbol]?.exchange === 'NSE' &&
+        INSTRUMENTS[symbol]?.category !== 'INDEX'
+    )
+    .slice(0, 3);
+  const account = useMemo(
+    () => paperAccount(book, now || new Date(0)),
+    [book, now]
+  );
+  const stats = useMemo(() => paperStats(book), [book]);
+  const regime = useMemo(
+    () => analyzeMarketCondition(candles.NIFTY || [], now || new Date(0)),
+    [candles, now]
+  );
+  async function action(fn: () => Promise<void>, success: string) {
+    setBusy(true);
+    setError('');
+    setMessage('');
     try {
-      const response = await cachedClientFetch(`/api/news?symbol=${symbol}`, {
-        cache: 'no-store',
-      });
-
-      const data = await response.json();
-
-      if (!response.ok || !data.success) {
-        return [];
-      }
-
-      return data.news || [];
-    } catch {
-      return [];
+      await fn();
+      setMessage(success);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Action failed.');
+    } finally {
+      setBusy(false);
+      setNow(new Date());
     }
   }
-
-  async function analyzeSentiments() {
-    if (!signals.length) return;
-
-    setLoadingSentiment(true);
-
-    const nextSentiments: Record<string, AISentiment> = {};
-    const nextNewsBySymbol: Record<string, NewsItem[]> = {};
-
-    for (const signal of signals) {
-      try {
-        const stockNews = await fetchNewsForSymbol(signal.symbol);
-        nextNewsBySymbol[signal.symbol] = stockNews;
-
-        const response = await cachedClientFetch('/api/hf/sentiment', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            text: buildNewsSentimentText(signal, stockNews),
-          }),
-        });
-
-        const data = await response.json();
-
-        if (!response.ok || !data.success) {
-          // Capture the actual error so we can show diagnostics.
-          const errorMsg = data.error || 'Unknown error';
-          console.warn(
-            `[HF Sentiment] ${signal.symbol}: ${errorMsg}`,
-            data.details || ''
-          );
-          nextSentiments[signal.symbol] = getFallbackSentiment(signal, errorMsg);
-          continue;
-        }
-
-        const result = data.result?.[0] || [];
-
-        const top = result.reduce((best: any, item: any) => {
-          if (!best || item.score > best.score) return item;
-          return best;
-        }, null);
-
-        const label = (top?.label || 'neutral').toLowerCase() as
-          | 'positive'
-          | 'negative'
-          | 'neutral';
-
-        const confidence = Math.round((top?.score || 0.6) * 100);
-
-        nextSentiments[signal.symbol] = {
-          label,
-          confidence,
-          signalScore: calculateSignalScore(signal, label, confidence),
-        };
-      } catch (error: any) {
-        const errorMsg = error?.message || 'Network or unknown error';
-        console.warn(`[HF Sentiment] ${signal.symbol}: ${errorMsg}`);
-        nextNewsBySymbol[signal.symbol] = [];
-        nextSentiments[signal.symbol] = getFallbackSentiment(signal, errorMsg);
-      }
+  async function enter(setup: PaperSetup) {
+    if (!reviewed) {
+      setError('Complete the session/event checklist first.');
+      return;
     }
-
-    setSentiments(nextSentiments);
-    setNewsBySymbol(nextNewsBySymbol);
-    setLoadingSentiment(false);
-  }
-
-  function isSignalAlreadyTracked(signal: TradeSignal) {
-    return trackedSignals.some(
-      (tracked) =>
-        tracked.symbol === signal.symbol &&
-        tracked.side === signal.side &&
-        !isTerminalStatus(tracked.lifecycleStatus)
+    await action(
+      () =>
+        transact((latest) =>
+          openPaperPosition(
+            latest,
+            setup,
+            prices[setup.symbol],
+            Number(charges),
+            Number(slippage),
+            notes,
+            new Date()
+          )
+        ),
+      'Paper entry recorded at the observed ask. No broker order was sent.'
     );
   }
-
-  function trackSignal(signal: TradeSignal) {
-    if (!isFreshSignalWindowOpenIST()) {
-      alert('Fresh intraday signals can be tracked only between 09:30 and 14:45 IST.');
-      return;
-    }
-
-    if (signal.side === 'NEUTRAL') {
-      alert('Neutral signals cannot be tracked.');
-      return;
-    }
-
-    if (isSignalAlreadyTracked(signal)) {
-      alert(`${signal.symbol} ${signal.side} signal is already being tracked.`);
-      return;
-    }
-
-    const currentPrice = prices[signal.symbol]?.price || signal.entry;
-
-    const trackedSignal: TrackedSignal = {
-      ...signal,
-      id: createId(),
-      createdAt: new Date().toISOString(),
-      lastCheckedAt: new Date().toISOString(),
-      lifecycleStatus: calculateLifecycleStatus(
-        {
-          ...signal,
-          id: 'temp',
-          createdAt: new Date().toISOString(),
-          lifecycleStatus: 'WAITING',
-        },
-        currentPrice
-      ),
-      sentiment: sentiments[signal.symbol],
-      news: newsBySymbol[signal.symbol] || [],
+  async function logSkip(symbol: string, reason: string, setup?: PaperSetup) {
+    await action(
+      () =>
+        transact((latest) => ({
+          ...latest,
+          observations: [
+            ...latest.observations,
+            {
+              id: crypto.randomUUID(),
+              symbol,
+              at: new Date().toISOString(),
+              reason: notes.trim() ? `${reason} Note: ${notes.trim()}` : reason,
+              setupId: setup?.id,
+            },
+          ],
+        })),
+      'Observation recorded. It is not counted as an entered trade.'
+    );
+  }
+  function exportCSV() {
+    const header = [
+      'mode',
+      'strategy',
+      'symbol',
+      'entry_time',
+      'entry',
+      'quantity',
+      'initial_stop',
+      'initial_target',
+      'planned_total_risk',
+      'exit_time',
+      'exit',
+      'total_charges',
+      'exit_reason',
+      'net_pl',
+      'net_r',
+      'notes',
+    ];
+    const rows = book.positions.map((p) => [
+      p.mode,
+      p.setup.version,
+      p.setup.symbol,
+      p.enteredAt,
+      p.entry,
+      p.quantity,
+      p.setup.stop,
+      p.setup.target,
+      p.plannedRisk,
+      p.exitedAt || '',
+      p.exit ?? '',
+      p.charges ?? '',
+      p.exitReason || '',
+      isClosed(p) ? positionPL(p) : '',
+      isClosed(p) ? positionPL(p) / p.plannedRisk : '',
+      p.notes,
+    ]);
+    // Prevent spreadsheet formulas in user notes while preserving numeric cells.
+    const cell = (value: unknown) => {
+      let text = String(value);
+      if (typeof value === 'string' && /^[=+@-]/.test(text)) text = "'" + text;
+      return `"${text.replaceAll('"', '""')}"`;
     };
-
-    setTrackedSignals((prev) => [trackedSignal, ...prev]);
-  }
-
-  function removeTrackedSignal(id: string) {
-    setTrackedSignals((prev) => prev.filter((signal) => signal.id !== id));
-  }
-
-  function clearCompletedSignals() {
-    setTrackedSignals((prev) =>
-      prev.filter((signal) => !isTerminalStatus(signal.lifecycleStatus))
+    download(
+      `paper-trades-${istDateKey()}.csv`,
+      [header, ...rows].map((row) => row.map(cell).join(',')).join('\r\n'),
+      'text/csv'
     );
   }
-
-  function canSaveTrackedSignalToJournal(signal: TrackedSignal) {
-    return (
-      signal.side !== 'NEUTRAL' &&
-      canSaveStatusToJournal(signal.lifecycleStatus)
-    );
-  }
-
-  function saveTrackedSignalToJournal(signal: TrackedSignal) {
-    if (signal.savedToJournal) {
-      alert('This signal is already saved to the journal.');
-      return;
-    }
-
-    if (!canSaveTrackedSignalToJournal(signal)) {
-      alert('Only target hit or stop loss hit signals can be saved.');
-      return;
-    }
-
-    if (signal.side !== 'BUY' && signal.side !== 'SELL') {
-      alert('Only BUY or SELL signals can be saved.');
-      return;
-    }
-
-    const exitPrice = getExitPriceForJournal(signal);
-
-    if (!exitPrice) {
-      alert('Could not calculate exit price.');
-      return;
-    }
-
-    const quantityText = window.prompt(
-      `Enter quantity for ${signal.symbol}`,
-      '1'
-    );
-
-    if (quantityText === null) return;
-
-    const quantity = Number(quantityText);
-
-    if (!quantity || quantity <= 0) {
-      alert('Enter a valid quantity.');
-      return;
-    }
-
-    const brokerageText = window.prompt('Enter brokerage/charges', '0');
-
-    if (brokerageText === null) return;
-
-    const brokerage = Number(brokerageText || 0);
-
-    if (brokerage < 0) {
-      alert('Brokerage cannot be negative.');
-      return;
-    }
-
-    addTrade({
-      symbol: signal.symbol,
-      side: signal.side,
-      entryPrice: signal.entry,
-      exitPrice,
-      quantity,
-      brokerage,
-    });
-
-    setTrackedSignals((prev) =>
-      prev.map((item) =>
-        item.id === signal.id
-          ? {
-              ...item,
-              savedToJournal: true,
-            }
-          : item
-      )
-    );
-
-    alert(`${signal.symbol} trade saved to journal.`);
-  }
-
-  function canManualExitTrackedSignal(signal: TrackedSignal) {
-    return (
-      signal.side !== 'NEUTRAL' &&
-      signal.lifecycleStatus !== 'WAITING' &&
-      !isTerminalStatus(signal.lifecycleStatus)
-    );
-  }
-
-  function saveManualExitToJournal(signal: TrackedSignal) {
-    if (signal.savedToJournal) {
-      alert('This signal is already saved to the journal.');
-      return;
-    }
-
-    if (!canManualExitTrackedSignal(signal)) {
-      alert('Only triggered/open trades can be manually exited.');
-      return;
-    }
-
-    if (signal.side !== 'BUY' && signal.side !== 'SELL') {
-      alert('Only BUY or SELL signals can be saved.');
-      return;
-    }
-
-    const currentPrice = prices[signal.symbol]?.price || signal.entry;
-
-    const exitPriceText = window.prompt(
-      `Enter manual exit price for ${signal.symbol}`,
-      String(currentPrice || signal.entry)
-    );
-
-    if (exitPriceText === null) return;
-
-    const exitPrice = Number(exitPriceText);
-
-    if (!exitPrice || exitPrice <= 0) {
-      alert('Enter a valid exit price.');
-      return;
-    }
-
-    const quantityText = window.prompt(
-      `Enter quantity for ${signal.symbol}`,
-      '1'
-    );
-
-    if (quantityText === null) return;
-
-    const quantity = Number(quantityText);
-
-    if (!quantity || quantity <= 0) {
-      alert('Enter a valid quantity.');
-      return;
-    }
-
-    const brokerageText = window.prompt('Enter brokerage/charges', '0');
-
-    if (brokerageText === null) return;
-
-    const brokerage = Number(brokerageText || 0);
-
-    if (brokerage < 0) {
-      alert('Brokerage cannot be negative.');
-      return;
-    }
-
-    addTrade({
-      symbol: signal.symbol,
-      side: signal.side,
-      entryPrice: signal.entry,
-      exitPrice,
-      quantity,
-      brokerage,
-      stopLoss: signal.stopLoss,
-      target: signal.target1,
-      outcome: 'MANUAL_EXIT',
-    });
-
-    setTrackedSignals((prev) =>
-      prev.map((item) =>
-        item.id === signal.id
-          ? {
-              ...item,
-              lifecycleStatus: 'MANUAL_EXIT',
-              savedToJournal: true,
-              lastCheckedAt: new Date().toISOString(),
-            }
-          : item
-      )
-    );
-
-    alert(`${signal.symbol} manual exit saved to journal.`);
-  }
-
-  function notifySignalStatusChange(signal: TrackedSignal) {
-    const status = signal.lifecycleStatus;
-
-    if (status === 'TRIGGERED') {
-      addAlert({
-        title: `${signal.symbol} Entry Triggered`,
-        message: `${signal.side} signal triggered at ${signal.entry.toFixed(
-          2
-        )}. Watch targets and stop loss.`,
-        type: 'info',
-      });
-      return;
-    }
-
-    if (status === 'BREAKEVEN_SUGGESTED') {
-      addAlert({
-        title: `${signal.symbol} Move SL to Cost`,
-        message: `${signal.side} trade reached profit protection zone. Consider moving stop loss near entry.`,
-        type: 'info',
-      });
-      return;
-    }
-
-    if (status === 'TRAIL_SL_SUGGESTED') {
-      addAlert({
-        title: `${signal.symbol} Trail SL Suggested`,
-        message: `${signal.side} trade has moved in your favor. Consider trailing stop loss.`,
-        type: 'info',
-      });
-      return;
-    }
-
-    if (status === 'TIME_EXIT_SUGGESTED') {
-      addAlert({
-        title: `${signal.symbol} Time Exit Suggested`,
-        message: `Intraday time exit zone reached. Consider manual exit or tight trailing stop.`,
-        type: 'warning',
-      });
-      return;
-    }
-
-    if (status === 'TARGET_1_HIT') {
-      addAlert({
-        title: `${signal.symbol} Target 1 Hit`,
-        message: `${signal.side} signal reached Target 1 at ${signal.target1.toFixed(
-          2
-        )}.`,
-        type: 'success',
-      });
-      return;
-    }
-
-    if (status === 'TARGET_2_HIT') {
-      addAlert({
-        title: `${signal.symbol} Target 2 Hit`,
-        message: `${signal.side} signal reached Target 2 at ${signal.target2.toFixed(
-          2
-        )}.`,
-        type: 'success',
-      });
-      return;
-    }
-
-    if (status === 'STOP_LOSS_HIT') {
-      addAlert({
-        title: `${signal.symbol} Stop Loss Hit`,
-        message: `${signal.side} signal hit stop loss at ${signal.stopLoss.toFixed(
-          2
-        )}.`,
-        type: 'danger',
-      });
-      return;
-    }
-  }
-
-  useEffect(() => {
-    if (!hydratedTracking) return;
-
-    const previousStatuses = previousSignalStatusesRef.current;
-    const nextStatuses: Record<string, string> = {};
-
-    trackedSignals.forEach((signal) => {
-      nextStatuses[signal.id] = signal.lifecycleStatus;
-
-      const previousStatus = previousStatuses[signal.id];
-
-      // First time loading existing signal: don't alert
-      if (!previousStatus) return;
-
-      // Alert only when status actually changes
-      if (previousStatus === signal.lifecycleStatus) return;
-
-      if (
-        signal.lifecycleStatus === 'TRIGGERED' ||
-        signal.lifecycleStatus === 'BREAKEVEN_SUGGESTED' ||
-        signal.lifecycleStatus === 'TRAIL_SL_SUGGESTED' ||
-        signal.lifecycleStatus === 'TIME_EXIT_SUGGESTED' ||
-        signal.lifecycleStatus === 'TARGET_1_HIT' ||
-        signal.lifecycleStatus === 'TARGET_2_HIT' ||
-        signal.lifecycleStatus === 'STOP_LOSS_HIT'
-      ) {
-        notifySignalStatusChange(signal);
-      }
-    });
-
-    previousSignalStatusesRef.current = nextStatuses;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trackedSignals, hydratedTracking]);
-
-  useEffect(() => {
-    if (!signals.length) return;
-
-    analyzeSentiments();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signals.length]);
-  const [marketCondition, setMarketCondition] = useState<MarketCondition | null>(null);
-
-
   return (
-    <main className="min-h-screen bg-[#050608] px-5 pb-28 pt-8 text-white">
-      <div className="mx-auto max-w-3xl">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-4xl font-bold">Signals</h1>
-            <p className="mt-2 text-slate-400">
-              Rule-based intraday watch signals with tracking and news sentiment.
-            </p>
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <button
-              onClick={() => {
-                updatePrices();
-                updateCandles();
-              }}
-              className="flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3 font-semibold text-white"
-            >
-              <RefreshCw className="h-4 w-4" />
-              Refresh
-            </button>
-
-            <button
-              onClick={analyzeSentiments}
-              className="flex items-center justify-center gap-2 rounded-2xl bg-purple-600 px-4 py-3 font-semibold text-white"
-            >
-              <Brain className="h-4 w-4" />
-              AI Check
-            </button>
-
-            <button
-              onClick={requestBrowserPermission}
-              className="flex items-center justify-center gap-2 rounded-2xl bg-blue-600 px-4 py-3 font-semibold text-white"
-            >
-              Enable Alerts
-            </button>
-
-            <p className="text-center text-xs text-slate-500">
-              {mounted && browserPermission === 'granted'
-                ? 'Browser alerts enabled'
-                : 'In-app alerts active'}
-            </p>
-          </div>
-        </div>
-
-        <div className="mt-5 rounded-2xl border border-yellow-500/20 bg-yellow-500/10 p-4 text-sm text-yellow-200">
-          Educational signal tracker only. Not financial advice. Signals are
-          generated using simple rules, Angel One market data, Google News RSS,
-          and Hugging Face sentiment analysis.
-        </div>
-
-        <section className="mt-8">
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <h2 className="text-sm uppercase tracking-[0.25em] text-slate-500">
-              Tracked Signals ({trackedSignals.length})
-            </h2>
-
-            {completedTrackedSignals.length > 0 && (
-              <button
-                onClick={clearCompletedSignals}
-                className="flex items-center gap-2 rounded-xl bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-300"
-              >
-                <CheckCircle2 className="h-4 w-4" />
-                Clear Completed
-              </button>
-            )}
-          </div>
-
-          {trackedSignals.length === 0 ? (
-            <div className="rounded-3xl border border-slate-800 bg-[#15161b] p-6 text-slate-400">
-              No tracked signals yet. Tap “Track Signal” on any active signal.
-            </div>
-          ) : (
-            <div className="space-y-5">
-              {activeTrackedSignals.map((signal) => (
-                <SignalCard
-                  key={signal.id}
-                  signal={signal}
-                  sentiment={signal.sentiment}
-                  loadingSentiment={false}
-                  news={signal.news || []}
-                  lifecycleStatus={signal.lifecycleStatus}
-                  currentPrice={prices[signal.symbol]?.price || 0}
-                  lastCheckedAt={signal.lastCheckedAt}
-                  onRemoveTracked={() => removeTrackedSignal(signal.id)}
-                  canSaveToJournal={canSaveTrackedSignalToJournal(signal)}
-                  savedToJournal={signal.savedToJournal}
-                  onSaveToJournal={() => saveTrackedSignalToJournal(signal)}
-                  canManualExit={canManualExitTrackedSignal(signal)}
-                  onManualExit={() => saveManualExitToJournal(signal)}
-                />
-              ))}
-
-              {completedTrackedSignals.map((signal) => (
-                <SignalCard
-                  key={signal.id}
-                  signal={signal}
-                  sentiment={signal.sentiment}
-                  loadingSentiment={false}
-                  news={signal.news || []}
-                  lifecycleStatus={signal.lifecycleStatus}
-                  currentPrice={prices[signal.symbol]?.price || 0}
-                  lastCheckedAt={signal.lastCheckedAt}
-                  onRemoveTracked={() => removeTrackedSignal(signal.id)}
-                  canSaveToJournal={canSaveTrackedSignalToJournal(signal)}
-                  savedToJournal={signal.savedToJournal}
-                  onSaveToJournal={() => saveTrackedSignalToJournal(signal)}
-                />
-              ))}
-            </div>
-          )}
-        </section>
-
-        {noTradeDayInfo.show && (
-          <div className="mt-8 rounded-2xl border border-red-500/30 bg-red-500/10 p-4">
-            <p className="text-sm font-bold text-red-300">
-              Market Condition: WEAK TRADEABILITY / NO CLEAN TRADE
-            </p>
-            <p className="mt-1 text-sm text-red-200">{noTradeDayInfo.message}</p>
-            <p className="mt-1 text-xs text-red-300/70">
-              {noTradeDayInfo.tradableCount} of {noTradeDayInfo.total} active
-              signals are TRADABLE right now.
-            </p>
-          </div>
-        )}
-
-        {marketCondition && (
-          <div className={`mt-4 rounded-2xl border p-4 ${
-            marketCondition.regime === 'favorable'
-              ? 'border-green-500/30 bg-green-500/10'
-              : marketCondition.regime === 'caution'
-              ? 'border-amber-500/30 bg-amber-500/10'
-              : 'border-red-500/30 bg-red-500/10'
-          }`}>
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="text-sm font-bold text-slate-200">Market Condition</p>
-                <p className={`mt-1 inline-block rounded-full px-3 py-1 text-xs font-semibold ${
-                  marketCondition.regime === 'favorable'
-                    ? 'bg-green-600 text-white'
-                    : marketCondition.regime === 'caution'
-                    ? 'bg-amber-600 text-white'
-                    : 'bg-red-600 text-white'
-                }`}>
-                  {marketCondition.regime === 'favorable' ? '✅ Favorable' : marketCondition.regime === 'caution' ? '⚠️ Caution' : '❌ Choppy'}
-                </p>
-              </div>
-            </div>
-            <div className="mt-3 grid grid-cols-2 gap-3">
-              <div>
-                <p className="text-xs text-slate-500">Volatility (ATR)</p>
-                <p className="mt-1 font-bold text-slate-200">{marketCondition.volatility.toUpperCase()} ({marketCondition.atrPercent.toFixed(2)}%)</p>
-              </div>
-              <div>
-                <p className="text-xs text-slate-500">Trend Strength (ADX)</p>
-                <p className="mt-1 font-bold text-slate-200">{marketCondition.trendStrength.toUpperCase()} ({marketCondition.adxValue.toFixed(1)})</p>
-              </div>
-            </div>
-            <p className="mt-3 text-xs text-slate-400">{marketCondition.recommendation}</p>
-          </div>
-        )}
-
-        {candleWarnings.length > 0 && (
-          <div className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4">
-            <p className="text-sm font-bold text-amber-300">
-              Candle Data Degraded for {candleWarnings.length}{' '}
-              {candleWarnings.length === 1 ? 'symbol' : 'symbols'}
-            </p>
-            <ul className="mt-1 space-y-0.5 text-xs text-amber-200/80">
-              {candleWarnings.slice(0, 8).map((w) => (
-                <li key={w.symbol}>
-                  {w.symbol}: {w.warning || w.error}
-                </li>
-              ))}
-            </ul>
-            <p className="mt-1 text-xs text-amber-300/70">
-              Signals for these symbols may be based on stale or missing
-              candle data.
-            </p>
-          </div>
-        )}
-
-        <section className="mt-8">
-          <h2 className="mb-4 text-sm uppercase tracking-[0.25em] text-slate-500">
-            Active Watch Signals ({activeSignals.length})
-          </h2>
-
-          {activeSignals.length === 0 ? (
-            <div className="rounded-3xl border border-slate-800 bg-[#15161b] p-6 text-slate-400">
-              No active buy/sell watch signals right now. Wait for cleaner setup.
-            </div>
-          ) : (
-            <div className="space-y-5">
-              {activeSignals.map((signal) => (
-                <SignalCard
-                  key={signal.symbol}
-                  signal={signal}
-                  sentiment={sentiments[signal.symbol]}
-                  loadingSentiment={loadingSentiment}
-                  news={newsBySymbol[signal.symbol] || []}
-                  onTrack={() => trackSignal(signal)}
-                  isTracked={isSignalAlreadyTracked(signal)}
-                />
-              ))}
-            </div>
-          )}
-        </section>
-
-        <section className="mt-8">
-          <h2 className="mb-4 text-sm uppercase tracking-[0.25em] text-slate-500">
-            Neutral / No Trade ({neutralSignals.length})
-          </h2>
-
-          <div className="space-y-5">
-            {neutralSignals.map((signal) => (
-              <SignalCard
-                key={signal.symbol}
-                signal={signal}
-                sentiment={sentiments[signal.symbol]}
-                loadingSentiment={loadingSentiment}
-                news={newsBySymbol[signal.symbol] || []}
-              />
-            ))}
-          </div>
-        </section>
+    <div className="space-y-5 pb-12">
+      <header>
+        <p className="text-xs font-semibold uppercase tracking-widest text-teal-300">
+          Phase 1 · ₹10,000 practice account
+        </p>
+        <h1 className="mt-2 text-3xl font-bold">Paper trading desk</h1>
+        <p className="mt-3 text-sm leading-relaxed text-slate-400">
+          One cash-equity setup. Recorded entries and exits. Costs included. No
+          broker orders and no promised win rate.
+        </p>
+      </header>
+      <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
+        <span className="rounded-full bg-slate-800 px-3 py-2">
+          {now
+            ? getIndianMarketStatus(now).replaceAll('_', ' ')
+            : 'Checking session…'}{' '}
+          · IST
+        </span>
+        <button
+          className="text-teal-300 underline disabled:opacity-40"
+          disabled={busy}
+          onClick={() =>
+            action(async () => {
+              await Promise.all([updatePrices(), updateCandles()]);
+            }, 'Market data refreshed; validity checks still apply.')
+          }
+        >
+          Refresh data
+        </button>
       </div>
-    </main>
+      {storageError && (
+        <p role="alert" className="rounded-xl bg-red-950 p-4 text-red-200">
+          {storageError} Use “Export journal backup” to preserve the stored
+          data.
+        </p>
+      )}
+      {error && (
+        <p role="alert" className="rounded-xl bg-red-950 p-4 text-red-200">
+          {error}
+        </p>
+      )}
+      {message && (
+        <p role="status" className="rounded-xl bg-teal-950 p-4 text-teal-200">
+          {message}
+        </p>
+      )}
+      <section className={card} aria-label="Practice risk budget">
+        <h2 className="font-semibold">Risk before reward</h2>
+        <dl className="mt-4 grid grid-cols-2 gap-4 text-sm">
+          <div>
+            <dt className="text-slate-400">Practice equity</dt>
+            <dd className="mt-1 text-xl font-semibold">
+              {money(account.equity)}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-slate-400">Next trade budget</dt>
+            <dd className="mt-1 text-xl font-semibold text-teal-300">
+              {money(account.riskBudget)}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-slate-400">Today, net</dt>
+            <dd>{money(account.dailyPL)}</dd>
+          </div>
+          <div>
+            <dt className="text-slate-400">Entries today</dt>
+            <dd>{account.tradesToday} / 2</dd>
+          </div>
+        </dl>
+        <p className="mt-4 text-xs leading-relaxed text-slate-400">
+          Total loss limits: ₹50/trade or 0.5% of equity, ₹100/day, ₹250/week,
+          ₹500/month and ₹500 drawdown. One open position. No leverage or fixed
+          daily profit target.
+        </p>
+        {account.reasons.map((reason) => (
+          <p key={reason} className="mt-2 text-sm text-amber-300">
+            {reason}
+          </p>
+        ))}
+      </section>
+      <details className={card}>
+        <summary className="cursor-pointer font-semibold">
+          The setup and session checklist
+        </summary>
+        <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm text-slate-300">
+          <li>
+            Trade research only from 09:45 to 11:15 IST. Review company results
+            and major scheduled events first.
+          </li>
+          <li>
+            Both stock and NIFTY must have rising 15-minute EMA20 trends with
+            enough completed history.
+          </li>
+          <li>
+            After two closes above EMA20 and session VWAP, a bullish candle
+            touches EMA20 and closes above both.
+          </li>
+          <li>
+            Entry is one current instrument tick above that candle’s high. Stop
+            is one tick below its low; target is twice the initial price risk.
+            The setup expires after two five-minute bars.
+          </li>
+          <li>
+            Skip late entries, wide spreads, obstructing highs, stale data and
+            costs that make net reward/risk less than 1.2.
+          </li>
+          <li>
+            Exit the whole paper position at the actual observed stop/target, or
+            after 30 minutes. Record the exit explicitly; this browser is not an
+            execution engine.
+          </li>
+        </ol>
+        <p className="mt-3 text-xs text-slate-500">
+          Research specification {STRATEGY_VERSION}. These rules have not been
+          shown to be profitable. The first three eligible watchlist shares form
+          the study universe.
+        </p>
+      </details>
+      <section className={card}>
+        <h2 className="font-semibold">Before considering an entry</h2>
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          <Field
+            label="Round-trip charges (₹)"
+            value={charges}
+            setValue={setCharges}
+          />
+          <Field
+            label="Slippage reserve (₹)"
+            value={slippage}
+            setValue={setSlippage}
+          />
+        </div>
+        <p className="mt-2 text-xs text-slate-400">
+          Use the broker’s estimate for this quantity, including all taxes and
+          levies. ₹15 + ₹1 is an unverified placeholder, not a quote from your
+          broker. Small accounts may have no qualifying trades after costs; do
+          not increase risk to force one.
+        </p>
+        {Number(charges) + Number(slippage) >
+          (account.riskBudget * (2 - 1.2)) / 3 && (
+          <p className="mt-3 text-sm text-amber-300">
+            At the current risk budget, a 2R target needs total estimated costs
+            of at most {money((account.riskBudget * (2 - 1.2)) / 3)} to meet net
+            R:R 1.2. The entered costs cannot qualify. Use verified costs; do
+            not lower them just to pass.
+          </p>
+        )}
+        <label className="mt-4 block text-sm text-slate-300">
+          Session / event notes
+          <textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            maxLength={2000}
+            className={input}
+            placeholder="Company results checked; no conflicting event; able to supervise."
+          />
+        </label>
+        <label className="mt-3 flex gap-2 text-sm text-slate-300">
+          <input
+            type="checkbox"
+            checked={reviewed}
+            onChange={(e) => setReviewed(e.target.checked)}
+          />
+          I checked scheduled events, verified the broker’s cost estimate and
+          can supervise this paper trade.
+        </label>
+      </section>
+      <section aria-label="Current research setups" className="space-y-3">
+        <h2 className="text-lg font-semibold">Watch, qualify, then record</h2>
+        {!symbols.length && (
+          <p className={card}>
+            Add up to three supported cash shares in{' '}
+            <Link className="text-teal-300 underline" href="/watchlist">
+              Watchlist
+            </Link>
+            .
+          </p>
+        )}
+        {symbols.map((symbol) => {
+          const decision = findPaperSetup(
+            symbol,
+            candles[symbol] || [],
+            candles.NIFTY || [],
+            prices[symbol],
+            now || new Date(0)
+          );
+          const setup = decision.setup;
+          const preview = setup
+            ? previewPaperEntry(
+                book,
+                setup,
+                prices[symbol],
+                Number(charges),
+                Number(slippage),
+                now || new Date(0)
+              )
+            : undefined;
+          const reasons = preview?.reasons || decision.reasons;
+          return (
+            <article key={symbol} className={card}>
+              <div className="flex justify-between gap-2">
+                <h3 className="font-bold">{symbol}</h3>
+                <span
+                  className={`text-xs ${preview?.allowed ? 'text-teal-300' : 'text-amber-300'}`}
+                >
+                  {preview?.allowed ? 'Paper entry eligible' : 'Watch only'}
+                </span>
+              </div>
+              {setup && (
+                <>
+                  <dl className="my-3 grid grid-cols-3 gap-2 text-xs">
+                    <div>
+                      <dt className="text-slate-500">Trigger</dt>
+                      <dd>{money(setup.entry)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-slate-500">Stop</dt>
+                      <dd>{money(setup.stop)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-slate-500">Target</dt>
+                      <dd>{money(setup.target)}</dd>
+                    </div>
+                  </dl>
+                  <p className="text-xs text-slate-400">
+                    Proposed quantity {preview?.sizing.suggestedQuantity} ·
+                    total risk {money(preview?.sizing.netLossAtStop || 0)} · net
+                    R:R {preview?.sizing.netRiskReward.toFixed(2)}
+                  </p>
+                  <p className="mt-2 text-xs text-slate-500">
+                    Setup candle{' '}
+                    {new Date(setup.barTime).toLocaleTimeString('en-IN', {
+                      timeZone: 'Asia/Kolkata',
+                    })}{' '}
+                    IST · expires{' '}
+                    {new Date(setup.expiresAt).toLocaleTimeString('en-IN', {
+                      timeZone: 'Asia/Kolkata',
+                    })}{' '}
+                    IST
+                  </p>
+                </>
+              )}
+              {reasons.map((reason) => (
+                <p key={reason} className="mt-2 text-sm text-slate-400">
+                  {reason}
+                </p>
+              ))}
+              <div className="mt-4 flex flex-wrap gap-3">
+                {setup && (
+                  <button
+                    disabled={
+                      !ready ||
+                      busy ||
+                      !reviewed ||
+                      !notes.trim() ||
+                      !preview?.allowed
+                    }
+                    onClick={() => enter(setup)}
+                    className={button}
+                  >
+                    Record paper entry at ask
+                  </button>
+                )}
+                <button
+                  disabled={!ready || busy}
+                  className="text-xs text-slate-400 underline disabled:opacity-40"
+                  onClick={() =>
+                    logSkip(
+                      symbol,
+                      reasons.join(' ') || 'Eligible setup passed by trader.',
+                      setup
+                    )
+                  }
+                >
+                  Log observation / skip
+                </button>
+              </div>
+            </article>
+          );
+        })}
+      </section>
+      {candleWarnings.length > 0 && (
+        <div className="text-xs text-amber-300">
+          {candleWarnings.map((warning, i) => (
+            <p key={i}>
+              {warning.symbol}: {warning.error || warning.warning}
+            </p>
+          ))}
+        </div>
+      )}
+      {account.open.map((position) => (
+        <OpenPosition
+          key={position.id}
+          position={position}
+          quote={prices[position.setup.symbol]}
+          now={now}
+          busy={busy}
+          onClose={(exit, cost, reason, at) =>
+            action(
+              () =>
+                transact((latest) =>
+                  closePaperPosition(
+                    latest,
+                    position.id,
+                    exit,
+                    cost,
+                    reason,
+                    at,
+                    new Date()
+                  )
+                ),
+              'Paper exit recorded with its price, costs and time.'
+            )
+          }
+        />
+      ))}
+      <section className={card}>
+        <h2 className="font-semibold">Evidence, not a promised percentage</h2>
+        <dl className="mt-4 grid grid-cols-2 gap-4 text-sm">
+          <div>
+            <dt className="text-slate-400">Closed paper trades</dt>
+            <dd className="text-xl">{stats.count} / 100</dd>
+          </div>
+          <div>
+            <dt className="text-slate-400">Sessions with entries</dt>
+            <dd className="text-xl">{stats.sessions} / 50</dd>
+          </div>
+          <div>
+            <dt className="text-slate-400">Net expectancy / trade</dt>
+            <dd>{stats.count ? money(stats.expectancy) : 'No sample yet'}</dd>
+          </div>
+          <div>
+            <dt className="text-slate-400">Net win rate</dt>
+            <dd>
+              {stats.winRate === null
+                ? 'No sample yet'
+                : `${stats.winRate.toFixed(1)}%`}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-slate-400">Net profit factor</dt>
+            <dd>
+              {stats.profitFactor === null
+                ? stats.count
+                  ? 'No net losing trades'
+                  : 'No sample yet'
+                : stats.profitFactor.toFixed(2)}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-slate-400">Maximum drawdown</dt>
+            <dd>{money(account.maxDrawdown)}</dd>
+          </div>
+        </dl>
+        {stats.interval && (
+          <p className="mt-3 text-xs text-slate-400">
+            95% Wilson interval: {stats.interval[0].toFixed(1)}–
+            {stats.interval[1].toFixed(1)}%. Assumes comparable independent
+            trades; regimes and correlated trades weaken that assumption.
+          </p>
+        )}
+        <p className="mt-3 text-xs text-slate-400">
+          {stats.wins} wins · {stats.losses} losses · {stats.breakeven} zero-net
+          trades. Manual and time exits count. No trade is created from a target
+          touch. Completing the sample does not automatically approve live
+          trading.
+        </p>
+      </section>
+      <details className={card}>
+        <summary className="cursor-pointer font-semibold">
+          Paper journal · {book.positions.length} positions ·{' '}
+          {book.observations.length} observations
+        </summary>
+        <div className="mt-4 flex flex-wrap gap-3">
+          <button
+            className="text-sm text-teal-300 underline"
+            onClick={() =>
+              download(
+                `paper-journal-${istDateKey()}.json`,
+                localStorage.getItem(PAPER_BOOK_KEY) || JSON.stringify(book),
+                'application/json'
+              )
+            }
+          >
+            Export journal backup
+          </button>
+          <button
+            className="text-sm text-teal-300 underline"
+            disabled={!ready}
+            onClick={exportCSV}
+          >
+            Export trade CSV
+          </button>
+          <Link className="text-sm text-teal-300 underline" href="/settings">
+            Restore in Settings
+          </Link>
+        </div>
+        {book.positions
+          .slice()
+          .reverse()
+          .map((p) => (
+            <div
+              className="mt-4 border-t border-slate-800 pt-3 text-sm"
+              key={p.id}
+            >
+              <p className="font-semibold">
+                {p.setup.symbol} · {p.quantity} shares ·{' '}
+                {isClosed(p) ? p.exitReason : 'OPEN'}
+              </p>
+              <p className="text-slate-400">
+                Entry {money(p.entry)} ·{' '}
+                {isClosed(p)
+                  ? `exit ${money(p.exit!)} · net ${money(positionPL(p))}`
+                  : 'Exit not yet recorded'}
+              </p>
+              <p className="text-xs text-slate-500">{p.notes}</p>
+            </div>
+          ))}
+        {book.observations
+          .slice(-10)
+          .reverse()
+          .map((o) => (
+            <p className="mt-3 text-xs text-slate-500" key={o.id}>
+              {o.symbol} · {o.reason}
+            </p>
+          ))}
+      </details>
+      <section className={card}>
+        <h2 className="font-semibold">NIFTY condition · research only</h2>
+        <p className="mt-2 text-sm text-slate-400">
+          {regime.available
+            ? `Wilder ADX ${regime.adxValue.toFixed(1)} · ATR ${regime.atrPercent.toFixed(3)}% · ${regime.trendStrength} trend`
+            : 'Current indicator data unavailable'}
+        </p>
+        <p className="mt-2 text-xs text-slate-500">{regime.recommendation}</p>
+      </section>
+      {symbols[0] && <NewsContext key={symbols[0]} symbol={symbols[0]} />}
+      <p className="text-xs leading-relaxed text-slate-500">
+        This browser stores the paper journal. Export backups regularly. A
+        suspended tab cannot monitor levels or observe every opportunity. Your{' '}
+        {legacyCount} older signal records and existing trade journal are
+        retained separately in{' '}
+        <Link href="/analytics" className="underline">
+          legacy analytics
+        </Link>
+        ; they do not contribute to this sample. Futures and CE/PE are excluded
+        from this cash-only study.
+      </p>
+    </div>
+  );
+}
+
+function OpenPosition({
+  position: p,
+  quote,
+  now,
+  busy,
+  onClose,
+}: {
+  position: PaperPosition;
+  quote: Parameters<typeof quoteProblem>[0];
+  now: Date | null;
+  busy: boolean;
+  onClose: (
+    exit: number,
+    charges: number,
+    reason: ExitReason,
+    at: string
+  ) => Promise<void>;
+}) {
+  const [exit, setExit] = useState(''),
+    [charges, setCharges] = useState(String(p.estimatedCharges)),
+    [reason, setReason] = useState<ExitReason>('MANUAL'),
+    [time, setTime] = useState('');
+  const fresh = now && !quoteProblem(quote, now),
+    elapsed = now ? (now.getTime() - Date.parse(p.enteredAt)) / 60000 : 0;
+  const level =
+    fresh && quote?.bid
+      ? quote.bid <= p.setup.stop
+        ? 'Stop level observed'
+        : quote.bid >= p.setup.target
+          ? 'Target level observed'
+          : elapsed >= 30
+            ? '30-minute time exit due'
+            : 'Position open'
+      : elapsed >= 30
+        ? '30-minute time exit due; feed unavailable'
+        : 'Feed unavailable — verify the position manually';
+  return (
+    <section className="rounded-2xl border border-amber-600/60 bg-amber-950/20 p-4">
+      <h2 className="font-bold">Open paper position · {p.setup.symbol}</h2>
+      <p className="mt-2 text-sm text-amber-300">
+        {level}. Record the observed exit; no automatic fill is assumed.
+      </p>
+      <p className="mt-2 text-sm text-slate-300">
+        {p.quantity} shares at {money(p.entry)} · stop {money(p.setup.stop)} ·
+        target {money(p.setup.target)}
+      </p>
+      <div className="mt-4 grid grid-cols-2 gap-3">
+        <Field
+          label="Observed exit price (₹)"
+          value={exit}
+          setValue={setExit}
+        />
+        <Field
+          label="Total round-trip charges (₹)"
+          value={charges}
+          setValue={setCharges}
+        />
+      </div>
+      <button
+        className="mt-2 text-xs text-teal-300 underline disabled:opacity-40"
+        disabled={!fresh || !quote?.bid}
+        onClick={() => setExit(String(quote?.bid || ''))}
+      >
+        Use current bid
+      </button>
+      <label className="mt-4 block text-sm text-slate-300">
+        Exit reason
+        <select
+          className={input}
+          value={reason}
+          onChange={(e) => setReason(e.target.value as ExitReason)}
+        >
+          <option value="MANUAL">Manual exit</option>
+          <option value="STOP">Stop exit</option>
+          <option value="TARGET">Target exit</option>
+          <option value="TIME">30-minute time exit</option>
+        </select>
+      </label>
+      <label className="mt-3 block text-sm text-slate-300">
+        Observed exit time (IST, blank = now)
+        <input
+          className={input}
+          type="datetime-local"
+          step="1"
+          value={time}
+          onChange={(e) => setTime(e.target.value)}
+        />
+      </label>
+      <button
+        className={`${button} mt-4`}
+        disabled={busy || !exit || !charges}
+        onClick={() =>
+          onClose(
+            Number(exit),
+            Number(charges),
+            reason,
+            time ? `${time}+05:30` : new Date().toISOString()
+          )
+        }
+      >
+        Record paper exit
+      </button>
+    </section>
   );
 }

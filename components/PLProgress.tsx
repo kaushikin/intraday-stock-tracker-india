@@ -49,7 +49,7 @@ export default function PLProgress() {
 
   const progress = useMemo(() => {
     const min = settings.dailyLossLimit;
-    const max = settings.dailyTarget;
+    const max = settings.dailyTarget || Math.abs(settings.dailyLossLimit);
     const range = max - min;
 
     if (range <= 0) return 50;
@@ -59,7 +59,7 @@ export default function PLProgress() {
 
   const zeroMarker = useMemo(() => {
     const min = settings.dailyLossLimit;
-    const max = settings.dailyTarget;
+    const max = settings.dailyTarget || Math.abs(settings.dailyLossLimit);
     const range = max - min;
 
     if (range <= 0) return 50;
@@ -68,16 +68,16 @@ export default function PLProgress() {
   }, [settings]);
 
   const isProfit = dailyPL >= 0;
-  const targetHit = dailyPL >= settings.dailyTarget;
+  const targetHit = settings.dailyTarget > 0 && dailyPL >= settings.dailyTarget;
   const lossLimitHit = dailyPL <= settings.dailyLossLimit;
 
   const barColor = targetHit
     ? 'bg-emerald-400'
     : lossLimitHit
-    ? 'bg-red-500'
-    : isProfit
-    ? 'bg-emerald-500'
-    : 'bg-red-500';
+      ? 'bg-red-500'
+      : isProfit
+        ? 'bg-emerald-500'
+        : 'bg-red-500';
 
   return (
     <div className="bg-zinc-900 rounded-[2rem] p-6 border border-zinc-800 shadow-lg">
@@ -102,7 +102,9 @@ export default function PLProgress() {
             Target
           </div>
           <div className="mt-1 font-mono text-2xl sm:text-3xl text-emerald-400">
-            {formatLimit(settings.dailyTarget)}
+            {settings.dailyTarget > 0
+              ? formatLimit(settings.dailyTarget)
+              : 'No target'}
           </div>
 
           <div className="mt-5 text-xs sm:text-sm text-zinc-400 uppercase tracking-wide">
@@ -130,7 +132,11 @@ export default function PLProgress() {
         <div className="mt-4 flex justify-between text-sm font-mono text-zinc-500">
           <span>{formatLimit(settings.dailyLossLimit)}</span>
           <span>0</span>
-          <span>{formatLimit(settings.dailyTarget)}</span>
+          <span>
+            {settings.dailyTarget > 0
+              ? formatLimit(settings.dailyTarget)
+              : 'No target'}
+          </span>
         </div>
       </div>
 

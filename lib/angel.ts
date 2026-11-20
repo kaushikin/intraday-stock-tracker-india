@@ -1,4 +1,4 @@
-import speakeasy from "speakeasy";
+import speakeasy from 'speakeasy';
 
 type AngelSessionCache = {
   jwtToken?: string;
@@ -24,14 +24,14 @@ function requiredEnv(name: string) {
 
 function angelHeaders(jwtToken?: string) {
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    Accept: "application/json",
-    "X-UserType": "USER",
-    "X-SourceID": "WEB",
-    "X-ClientLocalIP": "127.0.0.1",
-    "X-ClientPublicIP": "127.0.0.1",
-    "X-MACAddress": "00:00:00:00:00:00",
-    "X-PrivateKey": requiredEnv("ANGEL_API_KEY"),
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    'X-UserType': 'USER',
+    'X-SourceID': 'WEB',
+    'X-ClientLocalIP': '127.0.0.1',
+    'X-ClientPublicIP': '127.0.0.1',
+    'X-MACAddress': '00:00:00:00:00:00',
+    'X-PrivateKey': requiredEnv('ANGEL_API_KEY'),
   };
 
   if (jwtToken) {
@@ -52,34 +52,35 @@ export async function getAngelSession() {
     return global.angelSessionCache;
   }
 
-  const clientCode = requiredEnv("ANGEL_CLIENT_CODE");
-  const pin = requiredEnv("ANGEL_PIN");
-  const totpSecret = requiredEnv("ANGEL_TOTP_SECRET");
+  const clientCode = requiredEnv('ANGEL_CLIENT_CODE');
+  const pin = requiredEnv('ANGEL_PIN');
+  const totpSecret = requiredEnv('ANGEL_TOTP_SECRET');
 
   const totp = speakeasy.totp({
     secret: totpSecret,
-    encoding: "base32",
+    encoding: 'base32',
   });
 
   const response = await fetch(
-    "https://apiconnect.angelone.in/rest/auth/angelbroking/user/v1/loginByPassword",
+    'https://apiconnect.angelone.in/rest/auth/angelbroking/user/v1/loginByPassword',
     {
-      method: "POST",
+      method: 'POST',
       headers: angelHeaders(),
       body: JSON.stringify({
         clientcode: clientCode,
         password: pin,
         totp,
       }),
-      cache: "no-store",
+      cache: 'no-store',
+      signal: AbortSignal.timeout(10_000),
     }
   );
 
   const data = await response.json();
 
   if (!response.ok || !data?.data?.jwtToken) {
-    console.error("Angel login failed:", data);
-    throw new Error(data?.message || "Angel One login failed");
+    console.error('Angel login failed:', data);
+    throw new Error(data?.message || 'Angel One login failed');
   }
 
   const session: AngelSessionCache = {
@@ -99,15 +100,16 @@ export async function getAngelMarketData(
   const session = await getAngelSession();
 
   const response = await fetch(
-    "https://apiconnect.angelone.in/rest/secure/angelbroking/market/v1/quote/",
+    'https://apiconnect.angelone.in/rest/secure/angelbroking/market/v1/quote/',
     {
-      method: "POST",
+      method: 'POST',
       headers: angelHeaders(session.jwtToken),
       body: JSON.stringify({
-        mode: "FULL",
+        mode: 'FULL',
         exchangeTokens,
       }),
-      cache: "no-store",
+      cache: 'no-store',
+      signal: AbortSignal.timeout(10_000),
     }
   );
 
@@ -118,22 +120,22 @@ export async function getAngelMarketData(
   try {
     data = JSON.parse(raw);
   } catch {
-    console.error("Angel returned non-JSON response:", {
+    console.error('Angel returned non-JSON response:', {
       status: response.status,
       raw: raw.slice(0, 300),
       exchangeTokens,
     });
 
     throw new Error(
-      raw.toLowerCase().includes("access")
-        ? "Angel API access denied. Check IP whitelist, segment permission, or commodity/MCX access."
-        : "Angel returned invalid non-JSON response"
+      raw.toLowerCase().includes('access')
+        ? 'Angel API access denied. Check IP whitelist, segment permission, or commodity/MCX access.'
+        : 'Angel returned invalid non-JSON response'
     );
   }
 
   if (!response.ok || data?.status === false) {
-    console.error("Angel market data failed:", data);
-    throw new Error(data?.message || "Failed to fetch Angel market data");
+    console.error('Angel market data failed:', data);
+    throw new Error(data?.message || 'Failed to fetch Angel market data');
   }
 
   return data;
@@ -166,6 +168,7 @@ export async function getAngelCandleData(request: AngelCandleRequest) {
       headers: angelHeaders(session.jwtToken),
       body: JSON.stringify(request),
       cache: 'no-store',
+      signal: AbortSignal.timeout(10_000),
     }
   );
 
