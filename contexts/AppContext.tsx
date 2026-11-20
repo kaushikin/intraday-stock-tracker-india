@@ -17,6 +17,12 @@ import {
   type TradeRuleSettings,
 } from '@/lib/tradeRules';
 import { isIndianMarketOpen } from '@/lib/marketHours';
+import {
+  idleFeed,
+  requestErrors,
+  type FeedRequestState,
+} from '@/lib/feedStatus';
+import { PAPER_BOOK_KEY, parsePaperBook } from '@/lib/paperBook';
 
 export interface PriceData {
   price: number;
@@ -77,6 +83,8 @@ interface AppContextType {
   prices: Record<string, PriceData>;
   candles: Record<string, CandleData[]>;
   candleWarnings: CandleWarning[];
+  quoteFeed: FeedRequestState;
+  candleFeed: FeedRequestState;
   trades: Trade[];
   dailyPL: number;
   tradeRuleSettings: TradeRuleSettings;
@@ -127,10 +135,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
     'HDFCBANK',
   ]);
 
+  const [studySymbols, setStudySymbols] = useState<string[]>([]);
+  useEffect(() => {
+    const refresh = () => {
+      try {
+        const symbols =
+          parsePaperBook(localStorage.getItem(PAPER_BOOK_KEY)).research
+            ?.symbols || [];
+        setStudySymbols((prev) =>
+          JSON.stringify(prev) === JSON.stringify(symbols) ? prev : symbols
+        );
+      } catch {
+        setStudySymbols([]);
+      }
+    };
+    refresh();
+    window.addEventListener('paperBookUpdated', refresh);
+    window.addEventListener('storage', refresh);
+    return () => {
+      window.removeEventListener('paperBookUpdated', refresh);
+      window.removeEventListener('storage', refresh);
+    };
+  }, []);
+
   const [prices, setPrices] =
     useState<Record<string, PriceData>>(INITIAL_PRICES);
   const [candles, setCandles] = useState<Record<string, CandleData[]>>({});
   const [candleWarnings, setCandleWarnings] = useState<CandleWarning[]>([]);
+  const [quoteFeed, setQuoteFeed] = useState<FeedRequestState>(idleFeed);
+  const [candleFeed, setCandleFeed] = useState<FeedRequestState>(idleFeed);
   const [trades, setTrades] = useState<Trade[]>([]);
   const [dailyPL, setDailyPL] = useState(0);
   const [isTargetReached, setIsTargetReached] = useState(false);
@@ -206,15 +239,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [trades, calculateDailyPL, tradeRuleSettings]);
 
   const updatePrices = useCallback(async () => {
-    if (!watchlist.length) return;
+    if ((!watchlist.length && !studySymbols.length) || quoteBusy.current)
+      return;
 
-    const validSymbols = watchlist.filter((symbol) => INSTRUMENTS[symbol]);
+    const validSymbols = [...new Set([...studySymbols, ...watchlist])]
+      .filter((symbol) => INSTRUMENTS[symbol]?.exchange === 'NSE')
+      .slice(0, 18);
 
     if (!validSymbols.length) {
       console.warn('No valid Angel instruments found in watchlist');
       return;
     }
 
+    quoteBusy.current = true;
+    setQuoteFeed((prev) => ({
+      ...prev,
+      state: 'LOADING',
+      attemptedAt: new Date().toISOString(),
+      errors: [],
+    }));
     try {
       const response = await fetch('/api/market/quote', {
         method: 'POST',
@@ -222,6 +265,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           'Content-Type': 'application/json',
         },
         cache: 'no-store',
+        signal: AbortSignal.timeout(35_000),
         body: JSON.stringify({
           items: validSymbols.map((symbol) => {
             const instrument = INSTRUMENTS[symbol];
@@ -239,16 +283,43 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       if (!response.ok || !data.success) {
         setPrices({});
+        setQuoteFeed((prev) => ({
+          ...prev,
+          state: 'ERROR',
+          errors: [
+            {
+              symbol: 'ALL',
+              message: String(
+                data.error || `Quote request failed (HTTP ${response.status}).`
+              ).slice(0, 250),
+            },
+            ...requestErrors(data, [], []),
+          ],
+        }));
         return;
       }
 
+      const returned = (Array.isArray(data.quotes) ? data.quotes : []).filter(
+        (q: any) => validSymbols.includes(q.symbol)
+      );
+      const failures = requestErrors(
+        data,
+        validSymbols,
+        returned.map((q: any) => q.symbol)
+      );
+      setQuoteFeed((prev) => ({
+        ...prev,
+        state: failures.length ? 'PARTIAL' : 'OK',
+        receivedAt: new Date().toISOString(),
+        errors: failures,
+      }));
       setPrices((prev) => {
         const updated = { ...prev };
         validSymbols.forEach((symbol) => {
           delete updated[symbol];
         });
 
-        data.quotes.forEach((quote: any) => {
+        returned.forEach((quote: any) => {
           updated[quote.symbol] = {
             price: Number(quote.price || 0),
             change: Number(quote.changePercent || 0),
@@ -271,14 +342,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
     } catch (error) {
       setPrices({});
+      setQuoteFeed((prev) => ({
+        ...prev,
+        state: 'ERROR',
+        errors: [
+          {
+            symbol: 'ALL',
+            message:
+              'Quote request failed or timed out. Refresh and check the connection.',
+          },
+        ],
+      }));
       console.error('Live price update failed:', error);
+    } finally {
+      quoteBusy.current = false;
     }
-  }, [watchlist]);
+  }, [watchlist, studySymbols]);
 
   const updateCandles = useCallback(async () => {
-    if (!watchlist.length) return;
+    if ((!watchlist.length && !studySymbols.length) || candleBusy.current)
+      return;
 
-    const validSymbols = watchlist.filter((symbol) => INSTRUMENTS[symbol]);
+    const validSymbols = [...new Set([...studySymbols, ...watchlist])]
+      .filter((symbol) => INSTRUMENTS[symbol]?.exchange === 'NSE')
+      .slice(0, 18);
 
     if (!validSymbols.length) return;
 
@@ -290,6 +377,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       new Set([...validSymbols, ...indexSymbols])
     );
 
+    candleBusy.current = true;
+    setCandleFeed((prev) => ({
+      ...prev,
+      state: 'LOADING',
+      attemptedAt: new Date().toISOString(),
+      errors: [],
+    }));
     try {
       const response = await fetch('/api/market/candles', {
         method: 'POST',
@@ -297,6 +391,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           'Content-Type': 'application/json',
         },
         cache: 'no-store',
+        signal: AbortSignal.timeout(55_000),
         body: JSON.stringify({
           symbols: candleSymbols,
           interval: 'FIVE_MINUTE',
@@ -307,20 +402,60 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       if (!response.ok || !data.success) {
         setCandles({});
+        setCandleFeed((prev) => ({
+          ...prev,
+          state: 'ERROR',
+          errors: [
+            {
+              symbol: 'ALL',
+              message: String(
+                data.error || `Candle request failed (HTTP ${response.status}).`
+              ).slice(0, 250),
+            },
+          ],
+        }));
         setCandleWarnings([
           { symbol: 'ALL', error: data.error || 'Candle feed unavailable' },
         ]);
         return;
       }
 
+      const failures = requestErrors(
+        data,
+        candleSymbols,
+        Object.keys(data.candles || {}).filter(
+          (symbol) =>
+            Array.isArray(data.candles[symbol]) &&
+            data.candles[symbol].length > 0
+        )
+      );
+      setCandleFeed((prev) => ({
+        ...prev,
+        state: failures.length ? 'PARTIAL' : 'OK',
+        receivedAt: new Date().toISOString(),
+        errors: failures,
+      }));
       setCandles(data.candles || {});
       setCandleWarnings(data.errors || []);
     } catch (error) {
       setCandles({});
       setCandleWarnings([{ symbol: 'ALL', error: 'Candle feed unavailable' }]);
+      setCandleFeed((prev) => ({
+        ...prev,
+        state: 'ERROR',
+        errors: [
+          {
+            symbol: 'ALL',
+            message:
+              'Candle request failed or timed out. Refresh and check the connection.',
+          },
+        ],
+      }));
       console.error('Candle update failed:', error);
+    } finally {
+      candleBusy.current = false;
     }
-  }, [watchlist]);
+  }, [watchlist, studySymbols]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -329,17 +464,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setToday(istDateKey());
       if (document.hidden || !isIndianMarketOpen()) return;
       if (!quoteBusy.current) {
-        quoteBusy.current = true;
-        updatePrices().finally(() => {
-          quoteBusy.current = false;
-        });
+        void updatePrices();
       }
       if (!candleBusy.current && Date.now() - lastCandleFetch >= 30_000) {
-        candleBusy.current = true;
         lastCandleFetch = Date.now();
-        updateCandles().finally(() => {
-          candleBusy.current = false;
-        });
+        void updateCandles();
       }
     };
     // Timer remains mounted before open. Resuming a tab immediately checks freshness.
@@ -435,6 +564,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         prices,
         candles,
         candleWarnings,
+        quoteFeed,
+        candleFeed,
         trades,
         dailyPL,
         tradeRuleSettings,

@@ -4,6 +4,10 @@ import { istDateKey, isFreshSignalWindowOpenIST } from './marketHours';
 import { BAR_MS, quoteProblem } from './marketDataQuality';
 import { calculatePositionSizing } from './positionSizing';
 import { PaperSetup, STRATEGY_VERSION } from './paperStrategy';
+import {
+  validateResearchEvidence,
+  type ResearchEvidence,
+} from './researchEvidence';
 
 export const PAPER_BOOK_KEY = 'paper_trading_book_v1';
 export const PAPER_RULES = Object.freeze({
@@ -45,6 +49,7 @@ export type PaperBook = {
   version: 1;
   positions: PaperPosition[];
   observations: PaperObservation[];
+  research?: ResearchEvidence;
 };
 export const emptyPaperBook = (): PaperBook => ({
   version: 1,
@@ -477,5 +482,6 @@ export function parsePaperBook(
     )
   )
     throw new Error('Paper observations are invalid.');
+  validateResearchEvidence(book.research, now);
   return book;
 }

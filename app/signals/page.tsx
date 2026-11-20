@@ -26,6 +26,12 @@ import { analyzeMarketCondition } from '@/lib/marketCondition';
 import { quoteProblem } from '@/lib/marketDataQuality';
 import { usePaperBook } from '@/hooks/usePaperBook';
 import NewsContext from '@/components/NewsContext';
+import DataStatusPanel, {
+  optionalFeedsInitial,
+} from '@/components/DataStatusPanel';
+import BrokerChargesPanel from '@/components/BrokerChargesPanel';
+import ResearchChecklist from '@/components/ResearchChecklist';
+import { comparisonReady } from '@/lib/researchEvidence';
 
 const money = (value: number) => `₹${value.toFixed(2)}`;
 const card = 'rounded-2xl border border-slate-800 bg-slate-900/60 p-4';
@@ -85,6 +91,7 @@ export default function SignalsPage() {
     [slippage, setSlippage] = useState('1'),
     [notes, setNotes] = useState(''),
     [reviewed, setReviewed] = useState(false);
+  const [optionalFeeds, setOptionalFeeds] = useState(optionalFeedsInitial);
   const [legacyCount, setLegacyCount] = useState(0);
   useEffect(() => {
     setNow(new Date());
@@ -99,13 +106,19 @@ export default function SignalsPage() {
     }
     return () => window.clearInterval(timer);
   }, []);
-  const symbols = watchlist
-    .filter(
-      (symbol) =>
-        INSTRUMENTS[symbol]?.exchange === 'NSE' &&
-        INSTRUMENTS[symbol]?.category !== 'INDEX'
-    )
-    .slice(0, 3);
+  const symbols =
+    book.research?.symbols ||
+    watchlist
+      .filter(
+        (symbol) =>
+          INSTRUMENTS[symbol]?.exchange === 'NSE' &&
+          INSTRUMENTS[symbol]?.category !== 'INDEX'
+      )
+      .slice(0, 3);
+  const newsSymbol = symbols[0];
+  useEffect(() => {
+    setOptionalFeeds(optionalFeedsInitial);
+  }, [newsSymbol]);
   const account = useMemo(
     () => paperAccount(book, now || new Date(0)),
     [book, now]
@@ -130,14 +143,36 @@ export default function SignalsPage() {
     }
   }
   async function enter(setup: PaperSetup) {
+    if (!comparisonReady(book, setup.symbol, new Date())) {
+      setError(
+        'Complete a matching supervised broker comparison for this share today.'
+      );
+      return;
+    }
     if (!reviewed) {
       setError('Complete the session/event checklist first.');
       return;
     }
     await action(
       () =>
-        transact((latest) =>
-          openPaperPosition(
+        transact((latest) => {
+          if (!comparisonReady(latest, setup.symbol, new Date()))
+            throw new Error(
+              'Today’s supervised comparison is pending or failed.'
+            );
+          const latestSetup = findPaperSetup(
+            setup.symbol,
+            candles[setup.symbol] || [],
+            candles.NIFTY || [],
+            prices[setup.symbol],
+            new Date()
+          );
+          if (latestSetup.setup?.id !== setup.id)
+            throw new Error(
+              latestSetup.reasons.join(' ') ||
+                'The current setup changed. Review it again.'
+            );
+          return openPaperPosition(
             latest,
             setup,
             prices[setup.symbol],
@@ -145,8 +180,8 @@ export default function SignalsPage() {
             Number(slippage),
             notes,
             new Date()
-          )
-        ),
+          );
+        }),
       'Paper entry recorded at the observed ask. No broker order was sent.'
     );
   }
@@ -243,12 +278,13 @@ export default function SignalsPage() {
           onClick={() =>
             action(async () => {
               await Promise.all([updatePrices(), updateCandles()]);
-            }, 'Market data refreshed; validity checks still apply.')
+            }, 'Refresh finished. Check Data status for provider errors and timestamps.')
           }
         >
           Refresh data
         </button>
       </div>
+      <DataStatusPanel symbols={symbols} now={now} optional={optionalFeeds} />
       {storageError && (
         <p role="alert" className="rounded-xl bg-red-950 p-4 text-red-200">
           {storageError} Use “Export journal backup” to preserve the stored
@@ -300,6 +336,25 @@ export default function SignalsPage() {
           </p>
         ))}
       </section>
+      <ResearchChecklist
+        book={book}
+        symbols={symbols}
+        now={now}
+        ready={ready}
+        busy={busy}
+        transact={transact}
+        action={action}
+      />
+      <BrokerChargesPanel
+        book={book}
+        symbols={symbols}
+        ready={ready}
+        busy={busy}
+        riskBudget={account.riskBudget}
+        cash={account.availableCapital}
+        transact={transact}
+        action={action}
+      />
       <details className={card}>
         <summary className="cursor-pointer font-semibold">
           The setup and session checklist
@@ -334,8 +389,8 @@ export default function SignalsPage() {
         </ol>
         <p className="mt-3 text-xs text-slate-500">
           Research specification {STRATEGY_VERSION}. These rules have not been
-          shown to be profitable. The first three eligible watchlist shares form
-          the study universe.
+          shown to be profitable. The first saved research record fixes up to
+          three study shares.
         </p>
       </details>
       <section className={card}>
@@ -417,15 +472,25 @@ export default function SignalsPage() {
                 now || new Date(0)
               )
             : undefined;
-          const reasons = preview?.reasons || decision.reasons;
+          const compared = !!now && comparisonReady(book, symbol, now);
+          const reasons = [
+            ...(preview?.reasons || decision.reasons),
+            ...(!compared
+              ? [
+                  'Supervised broker comparison for this share is pending today.',
+                ]
+              : []),
+          ];
           return (
             <article key={symbol} className={card}>
               <div className="flex justify-between gap-2">
                 <h3 className="font-bold">{symbol}</h3>
                 <span
-                  className={`text-xs ${preview?.allowed ? 'text-teal-300' : 'text-amber-300'}`}
+                  className={`text-xs ${preview?.allowed && compared ? 'text-teal-300' : 'text-amber-300'}`}
                 >
-                  {preview?.allowed ? 'Paper entry eligible' : 'Watch only'}
+                  {preview?.allowed && compared
+                    ? 'Paper entry eligible'
+                    : 'Watch only'}
                 </span>
               </div>
               {setup && (
@@ -475,6 +540,7 @@ export default function SignalsPage() {
                       busy ||
                       !reviewed ||
                       !notes.trim() ||
+                      !compared ||
                       !preview?.allowed
                     }
                     onClick={() => enter(setup)}
@@ -656,7 +722,13 @@ export default function SignalsPage() {
         </p>
         <p className="mt-2 text-xs text-slate-500">{regime.recommendation}</p>
       </section>
-      {symbols[0] && <NewsContext key={symbols[0]} symbol={symbols[0]} />}
+      {symbols[0] && (
+        <NewsContext
+          key={symbols[0]}
+          symbol={symbols[0]}
+          onStatus={setOptionalFeeds}
+        />
+      )}
       <p className="text-xs leading-relaxed text-slate-500">
         This browser stores the paper journal. Export backups regularly. A
         suspended tab cannot monitor levels or observe every opportunity. Your{' '}

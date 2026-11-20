@@ -50,6 +50,13 @@ test('FinBERT passes only supplied headline and distinguishes classification fro
   result = await hf.POST(request({ text: 'Company reports earnings.' }));
   assert.equal(result.status, 502);
   assert.equal((await result.json()).result, undefined);
+  global.fetch = async () =>
+    Response.json({ error: 'Payment Required' }, { status: 402 });
+  result = await hf.POST(request({ text: 'Company reports earnings.' }));
+  assert.equal(result.status, 502);
+  const billing = await result.json();
+  assert.equal(billing.providerStatus, 402);
+  assert.match(billing.error, /billing|credit/i);
   global.fetch = async () => Response.json([{ label: 'positive', score: 4 }]);
   assert.equal(
     (await hf.POST(request({ text: 'Company reports earnings.' }))).status,

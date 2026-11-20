@@ -40,7 +40,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           success: false,
-          error: `Sentiment provider unavailable (HTTP ${response.status}).`,
+          providerStatus: response.status,
+          error:
+            response.status === 402
+              ? 'Hugging Face requires billing or credits (HTTP 402). Sentiment is optional; paper-trade qualification is unaffected.'
+              : response.status === 401 || response.status === 403
+                ? 'Hugging Face access was denied. Check the configured token and its permissions. Sentiment remains optional.'
+                : response.status === 429
+                  ? 'Hugging Face rate limit reached. Wait before retrying. Sentiment remains optional.'
+                  : `Sentiment provider unavailable (HTTP ${response.status}).`,
         },
         { status: 502 }
       );

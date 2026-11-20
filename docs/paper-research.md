@@ -4,7 +4,7 @@ This is a testable hypothesis, not a validated trading edge. Preserve rules thro
 
 ## Entry specification
 
-- Study the first three supported NSE cash-equity watchlist symbols, long only. No leverage or derivative lots.
+- Study the first three supported NSE cash-equity watchlist symbols, fixed on the first saved research record, long only. No leverage or derivative lots.
 - Regular verified NSE sessions, entries from 09:45 inclusive to 11:15 exclusive, IST.
 - Completed five-minute OHLCV bars only. Require at least 300 bars and 100 fully formed 15-minute bars for trend warm-up. Stock and NIFTY must have the same latest completed five-minute timestamp and current-session data.
 - On both stock and NIFTY, the last completed 15-minute close must exceed EMA20, and EMA20 must exceed its value three bars earlier, as known at setup creation.
@@ -22,6 +22,16 @@ All limits use the separate practice journal. ₹50 or 0.5% equity is a total pl
 One open position and two entries/day are enforced. Entries retain an immutable setup snapshot and cannot be closed twice. Exit the whole position at an observed stop/target or after 30 minutes; record price, total round-trip charges and actual IST time. Time/manual exits stay in the denominator. Net P/L is `(exit − entry) × quantity − total charges`. Observed prices already reflect price slippage; the initial reserve is not deducted again at exit.
 
 There is no automatic stop order or guaranteed loss cap. Gaps, spreads, fees, missed supervision and poor liquidity can cause losses beyond the plan. A closed tab cannot manage a trade.
+
+## Operational readiness (strategy parameters unchanged)
+
+The Data status panel reports provider attempts, successful responses, errors, exchange/receipt timestamps, latest completed bars, stale data and closed-session snapshots. Automatic refresh runs only in a visible tab during regular market hours. Outside that window, manual Refresh data is a connectivity check only.
+
+Before paper entries each day, compare the app snapshot with the Angel One terminal. Independently enter stock LTP and exchange timestamp, the completed five-minute candle start time, stock OHLCV and NIFTY OHLC. Save within five minutes. A price match allows one stock tick and ₹0.01 for NIFTY; stock volume and bar timestamps must match. Quote timestamps may differ by at most 30 seconds. A mismatched latest comparison blocks that share for the day until a fresh comparison passes. This records user observations; it is not independent feed certification. Freshness and the strategy's normal entry checks continue.
+
+Review the broker calculator or an existing contract note against the quantity-specific published-rate calculator. Record the source, date, reference, total and discrepancy. The November 2026 tariff includes NSE exchange charges of 0.0030699% and IPFT of 0.0000001% on turnover (combined ₹307/crore); the older IPFT rate must not be added again. Account-specific charges and day-level rounding remain unverified until reconciled. Never make a real trade just to obtain a fee statement.
+
+After 11:45 IST, save one session review per actual observed trading day: failures, discrepancies, missed opportunities and rule adherence. No-trade sessions may count for the five-session operational review. Once five distinct reviews exist, record operational findings and fixes without changing the entry, exit, sizing or risk rules. Preserve mistakes and failed comparisons in the sample and backup.
 
 ## Review
 
@@ -45,5 +55,6 @@ This implementation has not established profitability, a 70% win rate, live fill
 
 - [FinBERT model card](https://huggingface.co/ProsusAI/finbert): financial-text sentiment.
 - [Hugging Face text classification](https://huggingface.co/docs/inference-providers/tasks/text-classification): label/score output.
-- [Angel One brokerage](https://www.angelone.in/support/charges-and-cashbacks/brokerage-charges): the entry check uses a partial brokerage/GST floor, not an all-in tax calculator. Verify your actual plan.
+- [Angel One brokerage](https://www.angelone.in/support/charges-and-cashbacks/brokerage-charges): verify the actual account plan; the entry guard retains its existing partial floor, while the separate calculator itemizes the standard tariff.
+- [Angel One complete tariff](https://www.angelone.in/exchange-transaction-charges) and [NSE FA/73061](https://nsearchives.nseindia.com/content/circulars/FA73061.pdf): current published charges, distinct from account verification.
 - [NSE 2026 holidays](https://nsearchives.nseindia.com/content/circulars/CMTR71775.pdf) and [additional January closure](https://nsearchives.nseindia.com/content/circulars/CMTR72260.pdf).
