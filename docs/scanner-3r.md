@@ -34,6 +34,8 @@ Old open 2R scanner positions remain manageable under their original stop, targe
 
 ## Using the release
 
+The full ten-step Monday checklist is built into **Scan**, above the budget controls, at `/market#scanner-monday-checklist`. It includes expandable instructions and links to the data comparison, exact fee check, entry, open-position exit, notes and backup forms. Before selecting a candidate, data/fee/entry links lead to the candidate review instructions. The guide itself does not record verification evidence or write either journal; the existing saved checks still govern entry eligibility.
+
 1. Refresh the app and other open tabs. Export the scanner and Practice backups. Confirm the three fixed study shares.
 2. Open **Scan**. Confirm **Nifty 50 scanner · 3R**, the ₹50 risk cap, available cash, at least ₹5 execution reserve and ₹1 rounding reserve, plus higher account costs if applicable.
 3. During 09:45–11:15 IST, scan the official list, then recheck a candidate. Zero qualifying results is valid.

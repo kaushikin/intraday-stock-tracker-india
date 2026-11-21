@@ -302,7 +302,7 @@ export default function ScannerJournal({
   return (
     <section
       id="scanner-journal"
-      className="space-y-4"
+      className="scroll-mt-6 space-y-4"
       aria-label="Scanner paper journal"
     >
       <div className={card}>
@@ -386,78 +386,44 @@ export default function ScannerJournal({
         </p>
       </div>
 
-      {book.positions
-        .filter((p) => !isClosed(p))
-        .map((p) => (
-          <ScannerOpenPosition
-            key={p.id}
-            position={p}
-            now={clock}
-            disabled={disabled}
-            close={(exit, fees, reason, time, text) =>
-              action(
-                () =>
-                  transact((b) =>
-                    closeScannerPosition(
-                      b,
-                      p.id,
-                      exit,
-                      fees,
-                      reason,
-                      time,
-                      text
-                    )
-                  ),
-                'Scanner paper exit recorded. No broker order was sent.'
-              )
-            }
-          />
-        ))}
+      <div id="scanner-exit" className="scroll-mt-6 space-y-4">
+        {ready && !book.positions.some((p) => !isClosed(p)) && (
+          <p className={`${card} text-sm text-slate-300`}>
+            No open scanner paper position. After an entry, its supervision and
+            exit form appear here. Existing open 2R positions retain their
+            original stop and target.
+          </p>
+        )}
+        {book.positions
+          .filter((p) => !isClosed(p))
+          .map((p) => (
+            <ScannerOpenPosition
+              key={p.id}
+              position={p}
+              now={clock}
+              disabled={disabled}
+              close={(exit, fees, reason, time, text) =>
+                action(
+                  () =>
+                    transact((b) =>
+                      closeScannerPosition(
+                        b,
+                        p.id,
+                        exit,
+                        fees,
+                        reason,
+                        time,
+                        text
+                      )
+                    ),
+                  'Scanner paper exit recorded. No broker order was sent.'
+                )
+              }
+            />
+          ))}
+      </div>
 
-      <details className={card} open>
-        <summary className="cursor-pointer font-semibold">
-          Monday preparation and checks
-        </summary>
-        <ol className="mt-2 list-decimal space-y-2 pl-5 text-sm">
-          <li>
-            Before 09:45 IST: sign in, check Angel One access, confirm your
-            fixed study shares and restore the correct backups if needed. Use
-            the same device/browser.
-          </li>
-          <li>
-            Verify broker account charges and scheduled company events. The fee
-            calculator is an estimate; paper trades do not generate contract
-            notes.
-          </li>
-          <li>
-            Scan 09:45–11:15. Review a candidate, capture its completed candles
-            below, independently enter Angel One values, save the comparison and
-            exact trade fees.
-          </li>
-          <li>
-            Recheck before entry. If prices/quantity change, verify fees again.
-            Keep realistic costs; zero qualifying stocks is a valid outcome.
-          </li>
-          <li>
-            Supervise an open position. Quotes refresh about every 10 seconds
-            while visible in market hours. There are no background stops,
-            automatic exits, or broker orders.
-          </li>
-          <li>
-            After 11:45: close any due positions, log skipped opportunities/data
-            gaps and export both journals separately. Review operations after
-            five sessions without tuning the strategy.
-          </li>
-        </ol>
-        <p className="mt-3 text-xs text-amber-200">
-          Still to verify during market hours: exchange timestamps, matching
-          OHLCV, bid/ask/depth and real account fee differences. The app
-          calendar covers regular 2026 sessions only. Cash results do not
-          validate futures or CE/PE trades.
-        </p>
-      </details>
-
-      <div className={card}>
+      <div id="scanner-review" className={`${card} scroll-mt-6`}>
         <h3 className="font-semibold">
           {selected
             ? `Review scanner paper entry · ${selected}`
@@ -502,7 +468,10 @@ export default function ScannerJournal({
                 )}
               </p>
             )}
-            <div className="mt-4 border-t border-slate-700 pt-3">
+            <div
+              id="scanner-comparison"
+              className="mt-4 scroll-mt-6 border-t border-slate-700 pt-3"
+            >
               <h4 className="font-semibold">
                 1. Broker price and completed-candle comparison
               </h4>
@@ -551,7 +520,10 @@ export default function ScannerJournal({
                   : 'No saved scanner comparison for this share today.'}
               </p>
             </div>
-            <div className="mt-4 border-t border-slate-700 pt-3">
+            <div
+              id="scanner-fees"
+              className="mt-4 scroll-mt-6 border-t border-slate-700 pt-3"
+            >
               <h4 className="font-semibold">
                 2. Verify fees for the journal plan
               </h4>
@@ -626,7 +598,10 @@ export default function ScannerJournal({
                 </p>
               )}
             </div>
-            <div className="mt-4 border-t border-slate-700 pt-3">
+            <div
+              id="scanner-entry"
+              className="mt-4 scroll-mt-6 border-t border-slate-700 pt-3"
+            >
               <h4 className="font-semibold">
                 3. Record an explicit paper entry
               </h4>
@@ -696,7 +671,7 @@ export default function ScannerJournal({
           </>
         )}
       </div>
-      <div className={card}>
+      <div id="scanner-notes" className={`${card} scroll-mt-6`}>
         <h3 className="font-semibold">
           Scanner observations and session notes
         </h3>
@@ -798,7 +773,7 @@ export default function ScannerJournal({
             </details>
           ))}
       </div>
-      <div className={card}>
+      <div id="scanner-backup" className={`${card} scroll-mt-6`}>
         <h3 className="font-semibold">Separate scanner backup and restore</h3>
         <p className="mt-2 text-xs">
           JSON backup includes both scanner versions and preserves old records.

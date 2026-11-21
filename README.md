@@ -6,6 +6,8 @@ Repository: https://github.com/kaushikin/intraday-stock-tracker-india
 
 The [active scanner 3R protocol](docs/scanner-3r.md), also explained at `/cash-plan`, uses a separate `scanner-cash-3r-v2` strategy with larger cost reserves and the same ₹50 planned-risk cap. Practice remains 2R. Old scanner trades remain in the 2R history selector with separate statistics and CSVs; combined JSON backups preserve both versions. Refresh all app tabs before using this release.
 
+**Scan → Monday checklist · 3R scanner** contains the ten-step supervised workflow: backups, account fees, budget, scan, independent OHLCV comparison, exact stop/target charges, entry, supervision, exit and session review. Expand a step and follow its links to the existing forms. This guide does not save trades or change strategy rules, journal records or the three-stock study.
+
 ## Practice workflow
 
 Start with the [Monday verification checklist](docs/monday-checklist.md), also linked from Practice. It covers share selection, Angel One data comparison, broker charges and the entry checklist.

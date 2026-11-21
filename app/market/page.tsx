@@ -24,6 +24,7 @@ import {
   type ScannerData,
 } from '@/lib/scannerFeed';
 import ScannerJournal from '@/components/ScannerJournal';
+import ScannerMondayChecklist from '@/components/ScannerMondayChecklist';
 import type { NiftyUniverse } from '@/lib/nifty50';
 import { CHARGE_SCHEDULE } from '@/lib/brokerCharges';
 import { displayTime } from '@/components/DataStatusPanel';
@@ -318,7 +319,8 @@ export default function MarketPage() {
           across both journals. Study shares can only be entered in Practice.
         </p>
       </section>
-      <section className={card}>
+      <ScannerMondayChecklist hasCandidate={Boolean(selected)} />
+      <section id="scanner-budget" className={`${card} scroll-mt-6`}>
         <h2 className="font-semibold">Budget and cost assumptions</h2>
         <div className="mt-3 grid grid-cols-2 gap-3">
           {Object.keys(DEFAULT_SCAN_CONFIG).map((key) => (
@@ -394,7 +396,7 @@ export default function MarketPage() {
           Read the active 3R rules and cost examples
         </Link>
       </section>
-      <section className={card}>
+      <section id="scanner-run" className={`${card} scroll-mt-6`}>
         <p className="text-sm">
           {now
             ? getIndianMarketStatus(now).replaceAll('_', ' ')
