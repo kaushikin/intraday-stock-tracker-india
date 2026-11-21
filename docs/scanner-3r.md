@@ -34,6 +34,8 @@ Old open 2R scanner positions remain manageable under their original stop, targe
 
 ## Using the release
 
+For a rehearsal, open **Scan → Open ONGC practice demo** (`/market/demo`). All prices, candles, depth and times are fictional. The isolated route does not mount the normal application providers or journal hooks. Data/fee checks and the simulated entry/exit are temporary memory only; reset/refresh clears them without touching old trades, either journal, the watchlist, research counters or account risk limits. No demo export, import, live market request or broker order exists. A mismatch or changed readings invalidates readiness; the fixed exercise accepts a matched price/candle comparison and fees covering the current tariff. It then rehearses a 15-share ₹200 entry, ₹198 stop, ₹206 target and ₹197.90 stop exit with ₹13.86 total estimated charges, producing −₹45.36. Demo success is not actual broker verification. Leave any ongoing paper-position supervision complete before practising.
+
 The full ten-step Monday checklist is built into **Scan**, above the budget controls, at `/market#scanner-monday-checklist`. It includes expandable instructions and links to the data comparison, exact fee check, entry, open-position exit, notes and backup forms. Before selecting a candidate, data/fee/entry links lead to the candidate review instructions. The guide itself does not record verification evidence or write either journal; the existing saved checks still govern entry eligibility.
 
 1. Refresh the app and other open tabs. Export the scanner and Practice backups. Confirm the three fixed study shares.

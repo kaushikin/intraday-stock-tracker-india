@@ -8,6 +8,8 @@ The [active scanner 3R protocol](docs/scanner-3r.md), also explained at `/cash-p
 
 **Scan → Monday checklist · 3R scanner** contains the ten-step supervised workflow: backups, account fees, budget, scan, independent OHLCV comparison, exact stop/target charges, entry, supervision, exit and session review. Expand a step and follow its links to the existing forms. This guide does not save trades or change strategy rules, journal records or the three-stock study.
 
+**Scan → Open ONGC practice demo** (`/market/demo`) rehearses data verification, costs, entry and a stop-loss exit with fictional readings and a simulated Monday clock. It uses the current 3R and charge calculations, holds progress only in React memory and resets on refresh or Reset demo. The demo route excludes the normal app providers, live polling and journal hooks; it has no storage writes, export/import or order actions. Demo results do not count toward either study or use the shared entry allowance. Practise mismatched volume and higher fees before completing the example. Use demo mode only when no open paper position needs supervision.
+
 ## Practice workflow
 
 Start with the [Monday verification checklist](docs/monday-checklist.md), also linked from Practice. It covers share selection, Angel One data comparison, broker charges and the entry checklist.

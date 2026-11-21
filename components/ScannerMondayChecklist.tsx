@@ -88,6 +88,12 @@ export default function ScannerMondayChecklist({
           Backups
         </a>
       </nav>
+      <p className="mt-3 text-sm">
+        <Link className={link} href="/market/demo">
+          Rehearse these steps in the isolated ONGC demo
+        </Link>
+        {' '}— fictional readings, no saved journal records.
+      </p>
       <ol className="mt-5 space-y-3" aria-label="Monday scanner steps">
         <Step
           number={1}
