@@ -27,7 +27,7 @@ const navItems = [
   },
   {
     href: '/market',
-    label: 'Market',
+    label: 'Scan',
     icon: Globe2,
   },
   {

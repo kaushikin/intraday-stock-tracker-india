@@ -4,6 +4,7 @@ import { getCashInstruments } from '@/lib/cashInstruments';
 import { completedCandles } from '@/lib/marketDataQuality';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 type Candle = {
   time: string;

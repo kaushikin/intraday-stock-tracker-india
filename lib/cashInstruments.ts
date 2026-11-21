@@ -25,7 +25,7 @@ export function parseCashMaster(
     if (!row || typeof row !== 'object') continue;
     const symbol = String(row.name || '');
     if (
-      !INSTRUMENTS[symbol] ||
+      !/^[A-Z0-9][A-Z0-9&.-]{0,29}$/.test(symbol) ||
       row.exch_seg !== 'NSE' ||
       row.symbol !== `${symbol}-EQ` ||
       row.expiry ||

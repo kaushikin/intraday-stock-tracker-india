@@ -20,7 +20,7 @@ The study uses `cash-pullback-v1`, documented in [docs/paper-research.md](docs/p
 
 Practice automatically checks the fixed study shares while the tab is visible during regular market hours (quote requests about every 10 seconds, candle requests about every 30 seconds, subject to provider delays). It does not select a different universe each day, record fills automatically or monitor a closed app. NIFTY is confirmation, not a cash share to enter. A saved study universe takes precedence over subsequent Watchlist edits.
 
-The separate Market page is legacy. Its Nifty 50 / All modes currently submit more than the quote API's 20-symbol request limit, so those broad scans are unavailable; Quick Watch is a separate hardcoded list and uses the old signal engine. Use Practice for this study. This release documents that limitation without changing the frozen strategy or claiming a repaired market-wide scanner.
+The **Scan** tab (`/market`) is a separate Nifty 50 exploratory screen. It reads the official current constituents, fetches candle history in small sequential batches, then refreshes quotes and sizes candidates with quantity-specific charges. It uses the same setup function as Practice but does not change or write to the three-share study, Watchlist or journal. See [scanner operation and limits](docs/nifty50-scanner.md).
 
 ## Risk and costs
 
@@ -78,7 +78,7 @@ Tests use Node's built-in runner and the installed TypeScript compiler. Browser 
 - Paper journal and optional versioned research evidence: `paper_trading_book_v1`, separate from older trades and `tracked_signals_v1` observations.
 - Web Locks serialize journal writes; each write validates the latest stored state. Use a current browser in a secure context.
 - Backup/restore supports the paper journal and older app backups. Restore asks before replacement. Invalid paper data is rejected and retained for recovery.
-- The old dashboard, journal, analytics and scanner remain as legacy tools. Their results are not the new strategy's sample. Legacy settings do not alter Practice risk budgets.
+- The old dashboard, journal and analytics remain as legacy tools. The Scan tab is a separate exploratory tool. Their results are not the new strategy's sample. Legacy settings do not alter Practice risk budgets.
 - No server journal, order execution or reliable background monitoring. Suspended browsers can miss opportunities and exits. Exported records are self-recorded evidence, not audited broker statements.
 
 ## Calendar and validation limits

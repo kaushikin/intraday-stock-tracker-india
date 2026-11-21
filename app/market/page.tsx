@@ -1,741 +1,526 @@
 'use client';
-
-import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowDownRight,
-  ArrowUpRight,
-  BarChart3,
-  Gem,
-  RefreshCw,
-  ShieldAlert,
-  TrendingDown,
-  TrendingUp,
-} from 'lucide-react';
+  getIndianMarketStatus,
+  isFreshSignalWindowOpenIST,
+  istDateKey,
+} from '@/lib/marketHours';
 import {
-  INSTRUMENTS,
-  NIFTY50_SYMBOLS,
-  NATURAL_RESOURCES_SYMBOLS,
-} from '@/lib/instruments';
-import { generateSignalForStock } from '@/lib/signalEngine';
-import type { CandleData, PriceData } from '@/contexts/AppContext';
-
-type MarketQuote = PriceData & {
-  symbol: string;
-  exchange: 'NSE' | 'BSE' | 'MCX';
-  tradingSymbol?: string;
-  name?: string;
+  DEFAULT_SCAN_CONFIG,
+  rankShortlist,
+  SCANNER_VERSION,
+  screenCandidate,
+  validateScanConfig,
+  type ScanConfig,
+  type ScanResult,
+} from '@/lib/niftyScanner';
+import {
+  fetchScannerData,
+  loadScannerUniverse,
+  type ScanProgress,
+  type ScannerData,
+} from '@/lib/scannerFeed';
+import type { NiftyUniverse } from '@/lib/nifty50';
+import { CHARGE_SCHEDULE } from '@/lib/brokerCharges';
+import { displayTime } from '@/components/DataStatusPanel';
+const card = 'rounded-2xl border border-slate-700 bg-slate-900/60 p-4';
+const input =
+  'mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white';
+const button =
+  'rounded-xl bg-teal-700 px-4 py-3 text-sm font-semibold disabled:opacity-40';
+const money = (n: number) => `₹${n.toFixed(2)}`;
+type Snapshot = {
+  universe: NiftyUniverse;
+  data: ScannerData;
+  startedAt: string;
+  config: ScanConfig;
 };
-
-type MarketQuoteError = {
-  exchange?: string;
-  symbol?: string;
-  token?: string;
-  chunk?: number;
-  symbols?: string[];
-  tokens?: string[];
-  error?: string;
+const labels: Record<ScanResult['status'], string> = {
+  SHORTLIST: 'Fits estimated budget',
+  WATCH: 'Watch / does not fit',
+  UNAVAILABLE: 'Data unavailable / stale',
+  CLOSED: 'Outside entry window',
 };
-
-type MarketQuoteSummary = {
-  requested: number;
-  fetched: number;
-  errors: number;
-  chunkSize: number;
-} | null;
-
-function formatPrice(value: number) {
-  if (!value) return '--';
-  return `₹${value.toFixed(2)}`;
-}
-
-function formatChange(value: number) {
-  const sign = value >= 0 ? '+' : '';
-  return `${sign}${value.toFixed(2)}%`;
-}
-
-function isNearHigh(quote: MarketQuote) {
-  if (!quote.price || !quote.high || !quote.low) return false;
-
-  const range = quote.high - quote.low;
-
-  if (range <= 0) return false;
-
-  return quote.price >= quote.high - range * 0.2;
-}
-
-function isNearLow(quote: MarketQuote) {
-  if (!quote.price || !quote.high || !quote.low) return false;
-
-  const range = quote.high - quote.low;
-
-  if (range <= 0) return false;
-
-  return quote.price <= quote.low + range * 0.2;
-}
-
-function getSignalCandidateSymbols(quotes: Record<string, MarketQuote>) {
-  const quoteList = Object.values(quotes).filter((quote) => {
-    return (
-      quote.exchange === 'NSE' &&
-      quote.price > 0 &&
-      Boolean(quote.open && quote.high && quote.low) &&
-      quote.symbol !== 'NIFTY' &&
-      quote.symbol !== 'BANKNIFTY'
-    );
-  });
-
-  const buyCandidates = quoteList
-    .filter((quote) => {
-      if (!quote.open || !quote.high || !quote.low) return false;
-
-      const range = quote.high - quote.low;
-      if (range <= 0) return false;
-
-      const positionInRange = (quote.price - quote.low) / range;
-
-      return (
-        quote.price > quote.open &&
-        quote.change > 0 &&
-        positionInRange >= 0.45
-      );
-    })
-    .sort((a, b) => b.change - a.change)
-    .slice(0, 6)
-    .map((quote) => quote.symbol);
-
-  const sellCandidates = quoteList
-    .filter((quote) => {
-      if (!quote.open || !quote.high || !quote.low) return false;
-
-      const range = quote.high - quote.low;
-      if (range <= 0) return false;
-
-      const positionInRange = (quote.price - quote.low) / range;
-
-      return (
-        quote.price < quote.open &&
-        quote.change < 0 &&
-        positionInRange <= 0.55
-      );
-    })
-    .sort((a, b) => a.change - b.change)
-    .slice(0, 6)
-    .map((quote) => quote.symbol);
-
-  return Array.from(
-    new Set([...buyCandidates, ...sellCandidates, 'NIFTY', 'BANKNIFTY'])
-  ).filter((symbol) => INSTRUMENTS[symbol]);
-}
-
-function MarketCard({ quote }: { quote: MarketQuote }) {
-  const positive = quote.change >= 0;
-
-  return (
-    <div className="rounded-3xl border border-slate-800 bg-[#15161b] p-5">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h3 className="text-xl font-bold text-white">{quote.symbol}</h3>
-          <p className="mt-1 text-sm text-slate-500">
-            {quote.name || quote.tradingSymbol || quote.exchange}
-          </p>
-        </div>
-
-        <span
-          className={`rounded-full px-3 py-1 text-sm font-bold ${
-            positive
-              ? 'bg-green-500/15 text-green-400'
-              : 'bg-red-500/15 text-red-400'
-          }`}
-        >
-          {formatChange(quote.change)}
-        </span>
-      </div>
-
-      <p className="mt-4 text-3xl font-bold text-white">
-        {formatPrice(quote.price)}
-      </p>
-
-      <div className="mt-4 grid grid-cols-3 gap-2 text-sm">
-        <div className="rounded-2xl bg-black/30 p-3">
-          <p className="text-slate-500">Open</p>
-          <p className="font-semibold text-white">{formatPrice(quote.open || 0)}</p>
-        </div>
-
-        <div className="rounded-2xl bg-black/30 p-3">
-          <p className="text-slate-500">High</p>
-          <p className="font-semibold text-green-400">
-            {formatPrice(quote.high || 0)}
-          </p>
-        </div>
-
-        <div className="rounded-2xl bg-black/30 p-3">
-          <p className="text-slate-500">Low</p>
-          <p className="font-semibold text-red-400">
-            {formatPrice(quote.low || 0)}
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function CompactRow({ quote }: { quote: MarketQuote }) {
-  const positive = quote.change >= 0;
-
-  return (
-    <div className="flex items-center justify-between rounded-2xl border border-slate-800 bg-[#15161b] p-4">
-      <div>
-        <p className="font-bold text-white">{quote.symbol}</p>
-        <p className="text-xs text-slate-500">{quote.name || quote.exchange}</p>
-      </div>
-
-      <div className="text-right">
-        <p className="font-bold text-white">{formatPrice(quote.price)}</p>
-        <p className={positive ? 'text-sm text-green-400' : 'text-sm text-red-400'}>
-          {formatChange(quote.change)}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-function Section({
-  title,
-  subtitle,
-  icon,
-  children,
-}: {
-  title: string;
-  subtitle?: string;
-  icon: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="mt-8">
-      <div className="mb-4 flex items-center gap-3">
-        <div className="rounded-2xl bg-slate-900 p-3 text-slate-400">{icon}</div>
-        <div>
-          <h2 className="text-sm uppercase tracking-[0.25em] text-slate-500">
-            {title}
-          </h2>
-          {subtitle && <p className="mt-1 text-sm text-slate-500">{subtitle}</p>}
-        </div>
-      </div>
-
-      {children}
-    </section>
-  );
-}
-
 export default function MarketPage() {
-  const [quotes, setQuotes] = useState<Record<string, MarketQuote>>({});
-  const [marketCandles, setMarketCandles] = useState<Record<string, CandleData[]>>({});
-  const [loading, setLoading] = useState(false);
-  const [scanMode, setScanMode] = useState<'WATCH' | 'NIFTY50' | 'ALL'>('NIFTY50');
-  const [quoteErrors, setQuoteErrors] = useState<MarketQuoteError[]>([]);
-  const [quoteSummary, setQuoteSummary] = useState<MarketQuoteSummary>(null);
-
-  const symbolsToScan = useMemo(() => {
-    if (scanMode === 'NIFTY50') {
-      return NIFTY50_SYMBOLS;
-    }
-
-    if (scanMode === 'ALL') {
-      return [...NIFTY50_SYMBOLS, ...NATURAL_RESOURCES_SYMBOLS];
-    }
-
-    return ['RELIANCE', 'TCS', 'HDFCBANK', 'SBIN', 'BEL'];
-  }, [scanMode]);
-
-  const fetchMarketQuotes = useCallback(async () => {
-    setLoading(true);
-    setQuoteErrors([]);
-
+  const [values, setValues] = useState(
+    Object.fromEntries(
+      Object.entries(DEFAULT_SCAN_CONFIG).map(([k, v]) => [k, String(v)])
+    )
+  );
+  const [snapshot, setSnapshot] = useState<Snapshot | null>(null),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState(''),
+    [progress, setProgress] = useState<ScanProgress | null>(null),
+    [now, setNow] = useState<Date | null>(null),
+    [auto, setAuto] = useState(false);
+  const controller = useRef<AbortController | null>(null),
+    mounted = useRef(false);
+  const config = useMemo(() => {
     try {
-      const validSymbols = symbolsToScan.filter((symbol) => INSTRUMENTS[symbol]);
-
-      const response = await fetch('/api/market/quote', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        cache: 'no-store',
-        body: JSON.stringify({
-          items: validSymbols.map((symbol) => {
-            const instrument = INSTRUMENTS[symbol];
-
-            return {
-              symbol: instrument.symbol,
-              exchange: instrument.exchange,
-              token: instrument.token,
-            };
-          }),
-        }),
-      });
-
-      const data = await response.json();
-
-      setQuoteErrors(Array.isArray(data.errors) ? data.errors : []);
-      setQuoteSummary(data.summary || null);
-
-      if (!response.ok || !data.success) {
-        console.error('Market overview quote error:', data);
-        return;
-      }
-
-      const nextQuotes: Record<string, MarketQuote> = {};
-
-      data.quotes.forEach((quote: any) => {
-        const instrument = INSTRUMENTS[quote.symbol];
-
-        nextQuotes[quote.symbol] = {
-          symbol: quote.symbol,
-          exchange: quote.exchange,
-          tradingSymbol: quote.tradingSymbol,
-          name: instrument?.name,
-          price: Number(quote.price || 0),
-          change: Number(quote.changePercent || 0),
-          open: Number(quote.open || 0),
-          high: Number(quote.high || 0),
-          low: Number(quote.low || 0),
-          close: Number(quote.close || 0),
-          lastUpdated: quote.lastUpdated,
-        };
-      });
-
-      setQuotes(nextQuotes);
-
-      const signalCandidateSymbols =
-        scanMode === 'WATCH'
-          ? Array.from(new Set([...validSymbols, 'NIFTY', 'BANKNIFTY'])).filter(
-              (symbol) => INSTRUMENTS[symbol]
-            )
-          : getSignalCandidateSymbols(nextQuotes);
-
-      if (signalCandidateSymbols.length > 0) {
-        try {
-          const candleResponse = await fetch('/api/market/candles', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            cache: 'no-store',
-            body: JSON.stringify({
-              symbols: signalCandidateSymbols,
-              interval: 'FIVE_MINUTE',
-            }),
-          });
-
-          const candleData = await candleResponse.json();
-
-          if (candleResponse.ok && candleData.success) {
-            setMarketCandles((prev) => ({
-              ...prev,
-              ...(candleData.candles || {}),
-            }));
-          } else {
-            console.error('Market signal candle fetch failed:', candleData);
-          }
-        } catch (error) {
-          console.error('Market signal candle fetch error:', error);
-        }
-      }
-    } catch (error: any) {
-      console.error('Market overview fetch failed:', error);
-
-      setQuoteErrors([
-        {
-          exchange: 'UNKNOWN',
-          error: error?.message || 'Market overview fetch failed',
-        },
-      ]);
-    } finally {
-      setLoading(false);
+      if (Object.values(values).some((v) => !v.trim()))
+        throw new Error('Complete every budget and cost field.');
+      const parsed = Object.fromEntries(
+        Object.entries(values).map(([k, v]) => [k, Number(v)])
+      ) as ScanConfig;
+      validateScanConfig(parsed);
+      return { value: parsed, error: '' };
+    } catch (e) {
+      return {
+        value: undefined,
+        error: e instanceof Error ? e.message : 'Invalid settings.',
+      };
     }
-  }, [scanMode, symbolsToScan]);
-
+  }, [values]);
   useEffect(() => {
-    fetchMarketQuotes();
-  }, [fetchMarketQuotes]);
-
-  const quoteList = useMemo(() => {
-    return Object.values(quotes).filter((quote) => quote.price > 0);
-  }, [quotes]);
-
-  const topGainers = useMemo(() => {
-    return [...quoteList].sort((a, b) => b.change - a.change).slice(0, 5);
-  }, [quoteList]);
-
-  const topLosers = useMemo(() => {
-    return [...quoteList].sort((a, b) => a.change - b.change).slice(0, 5);
-  }, [quoteList]);
-
-  const nearHigh = useMemo(() => {
-    return quoteList.filter(isNearHigh).sort((a, b) => b.change - a.change).slice(0, 6);
-  }, [quoteList]);
-
-  const nearLow = useMemo(() => {
-    return quoteList.filter(isNearLow).sort((a, b) => a.change - b.change).slice(0, 6);
-  }, [quoteList]);
-
-  const naturalResources = useMemo(() => {
-    return NATURAL_RESOURCES_SYMBOLS.map((symbol) => quotes[symbol]).filter(Boolean);
-  }, [quotes]);
-
-  const signals = useMemo(() => {
-    return quoteList.map((quote) =>
-      generateSignalForStock(
-        quote.symbol,
-        {
-          price: quote.price,
-          change: quote.change,
-          open: quote.open,
-          high: quote.high,
-          low: quote.low,
-          close: quote.close,
-          lastUpdated: quote.lastUpdated,
-        },
-        marketCandles[quote.symbol] || [],
-        marketCandles
+    mounted.current = true;
+    setNow(new Date());
+    const timer = window.setInterval(() => setNow(new Date()), 5000);
+    const hide = () => {
+      if (document.hidden) controller.current?.abort();
+    };
+    document.addEventListener('visibilitychange', hide);
+    return () => {
+      mounted.current = false;
+      controller.current?.abort();
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', hide);
+    };
+  }, []);
+  const run = useCallback(
+    async (symbol?: string) => {
+      if (controller.current || !config.value || document.hidden) return;
+      const abort = new AbortController();
+      controller.current = abort;
+      setBusy(true);
+      setError('');
+      setProgress(null);
+      const previous = snapshot,
+        startedAt = new Date().toISOString();
+      setSnapshot(null);
+      try {
+        const universe = await loadScannerUniverse(abort.signal);
+        if (symbol && !universe.members.some((m) => m.symbol === symbol))
+          throw new Error(
+            'This symbol is no longer in the verified Nifty 50 list. Run a full scan.'
+          );
+        const symbols = symbol
+          ? [symbol]
+          : universe.members.map((m) => m.symbol);
+        const result = await fetchScannerData(symbols, abort.signal, (p) => {
+          if (mounted.current) setProgress(p);
+        });
+        abort.signal.throwIfAborted();
+        // A one-share recheck retains other snapshots; freshness is still evaluated for each row.
+        const sameUniverse =
+          previous &&
+          JSON.stringify(previous.universe.members.map((m) => m.symbol)) ===
+            JSON.stringify(universe.members.map((m) => m.symbol));
+        const data =
+          symbol && sameUniverse
+            ? {
+                ...result,
+                quotes: { ...previous.data.quotes, ...result.quotes },
+                candles: { ...previous.data.candles, ...result.candles },
+                errors: { ...previous.data.errors, ...result.errors },
+              }
+            : result;
+        if (symbol && sameUniverse) {
+          delete data.quotes[symbol];
+          if (result.quotes[symbol])
+            data.quotes[symbol] = result.quotes[symbol];
+          delete data.errors[symbol];
+          delete data.errors.NIFTY;
+          if (result.errors[symbol])
+            data.errors[symbol] = result.errors[symbol];
+          if (result.errors.NIFTY) data.errors.NIFTY = result.errors.NIFTY;
+        }
+        if (mounted.current) {
+          setSnapshot({
+            universe,
+            data,
+            startedAt,
+            config: { ...config.value },
+          });
+          setNow(new Date());
+        }
+      } catch (e) {
+        if (mounted.current)
+          setError(
+            abort.signal.aborted
+              ? 'Scan cancelled or paused when the tab was hidden. Run again when ready.'
+              : e instanceof Error
+                ? e.message
+                : 'Scan failed.'
+          );
+      } finally {
+        if (controller.current === abort) controller.current = null;
+        if (mounted.current) setBusy(false);
+      }
+    },
+    [config, snapshot]
+  );
+  useEffect(() => {
+    if (!auto) return;
+    const timer = window.setInterval(() => {
+      if (!document.hidden && isFreshSignalWindowOpenIST()) void run();
+    }, 300_000);
+    return () => window.clearInterval(timer);
+  }, [auto, run]);
+  const results = useMemo(() => {
+    if (!snapshot || !now) return [];
+    return snapshot.universe.members.map((m) =>
+      screenCandidate(
+        m.symbol,
+        snapshot.data.quotes[m.symbol],
+        snapshot.data.candles[m.symbol] || [],
+        snapshot.data.candles.NIFTY || [],
+        snapshot.config,
+        now,
+        [
+          ...(snapshot.universe.asOf !== istDateKey(now)
+            ? [
+                'Universe verification belongs to an earlier day. Run a new scan.',
+              ]
+            : []),
+          ...(snapshot.data.errors[m.symbol] || []),
+          ...(snapshot.data.errors.NIFTY || []).map((e) => `NIFTY: ${e}`),
+        ]
       )
     );
-  }, [quoteList, marketCandles]);
-
-  const buySignals = signals.filter((signal) => signal.side === 'BUY').slice(0, 5);
-  const sellSignals = signals.filter((signal) => signal.side === 'SELL').slice(0, 5);
-
-  const nearSignals = signals
-    .filter((signal) => signal.side === 'NEUTRAL')
-    .filter((signal) => {
-      return signal.reasons.some((reason) => {
-        return (
-          reason.includes('BUY score') ||
-          reason.includes('SELL score') ||
-          reason.includes('Waiting for enough') ||
-          reason.includes('No clean high-probability setup')
-        );
-      });
-    })
-    .slice(0, 8);
-
-  return (
-    <main className="min-h-screen bg-[#050608] px-5 pb-28 pt-8 text-white">
-      <div className="mx-auto max-w-5xl">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-4xl font-bold">Market</h1>
-            <p className="mt-2 text-slate-400">
-              Nifty 50 and Natural Resources market scanner.
+  }, [snapshot, now]);
+  const shortlist = rankShortlist(results),
+    unavailable = results.filter((r) => r.status === 'UNAVAILABLE').length;
+  function exportScan() {
+    if (!snapshot) return;
+    const text = JSON.stringify(
+      {
+        version: SCANNER_VERSION,
+        purpose: 'exploratory-screen-only',
+        ...snapshot,
+        results,
+        evaluatedAt: now?.toISOString(),
+      },
+      null,
+      2
+    );
+    const url = URL.createObjectURL(
+      new Blob([text], { type: 'application/json' })
+    );
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `nifty50-scan-${istDateKey()}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  function detail(r: ScanResult) {
+    return (
+      <>
+        <p className="mt-2 text-xs text-slate-400">
+          Exchange {displayTime(r.exchangeTime)} · candle start{' '}
+          {displayTime(r.candleTime)}
+        </p>
+        {r.setup && (
+          <p className="mt-2 text-sm">
+            Trigger {money(r.setup.entry)} · stop {money(r.setup.stop)} · target{' '}
+            {money(r.setup.target)}
+          </p>
+        )}
+        {r.plan && (
+          <div className="mt-3 grid grid-cols-2 gap-2 rounded-lg bg-slate-950 p-3 text-xs">
+            <p>
+              Observed ask <strong>{money(r.plan.entry)}</strong>
+            </p>
+            <p>
+              Quantity <strong>{r.plan.quantity}</strong>
+            </p>
+            <p>
+              Total planned risk <strong>{money(r.plan.risk)}</strong>
+            </p>
+            <p>
+              Net target reward <strong>{money(r.plan.reward)}</strong>
+            </p>
+            <p>
+              Net reward/risk <strong>{r.plan.netRR.toFixed(3)}</strong>
+            </p>
+            <p>
+              Cash with costs <strong>{money(r.plan.cashRequired)}</strong>
+            </p>
+            <p>Fees at stop {money(r.plan.atStop.total)}</p>
+            <p>Fees at target {money(r.plan.atTarget.total)}</p>
+            <p className="col-span-2">
+              Planning fees + rounding / extra charges{' '}
+              {money(r.plan.planningCharges)}; slippage{' '}
+              {money(snapshot?.config.slippage || 0)} separately included.
             </p>
           </div>
-
-          <button
-            onClick={fetchMarketQuotes}
-            disabled={loading}
-            className="flex items-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3 font-semibold text-white disabled:opacity-60"
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
-          </button>
-        </div>
-
-        <div className="mt-5 flex gap-2 overflow-x-auto">
-          {[
-            { id: 'WATCH', label: 'Quick Watch' },
-            { id: 'NIFTY50', label: 'Nifty 50' },
-            { id: 'ALL', label: 'All + Resources' },
-          ].map((mode) => (
-            <button
-              key={mode.id}
-              onClick={() => setScanMode(mode.id as any)}
-              className={`whitespace-nowrap rounded-full px-4 py-2 text-sm font-semibold ${
-                scanMode === mode.id
-                  ? 'bg-emerald-600 text-white'
-                  : 'bg-slate-900 text-slate-400'
-              }`}
-            >
-              {mode.label}
-            </button>
+        )}
+        {r.reasons.map((reason) => (
+          <p key={reason} className="mt-2 text-sm text-amber-200">
+            {reason}
+          </p>
+        ))}
+        {r.status === 'SHORTLIST' && (
+          <p className="mt-3 text-xs text-amber-200">
+            Broker price/candle comparison, exact account charges and event
+            review still required. This is an estimated screen result, not a
+            trade approval.
+          </p>
+        )}
+        <button
+          className="mt-3 text-sm text-teal-300 underline disabled:opacity-40"
+          disabled={busy || !now || !isFreshSignalWindowOpenIST(now)}
+          onClick={() => void run(r.symbol)}
+        >
+          Recheck {r.symbol}
+        </button>
+      </>
+    );
+  }
+  return (
+    <div className="space-y-5 pb-12">
+      <header>
+        <p className="text-xs uppercase tracking-widest text-teal-300">
+          Separate exploratory screen
+        </p>
+        <h1 className="mt-2 text-3xl font-bold">Nifty 50 scanner</h1>
+        <p className="mt-3 text-sm text-slate-300">
+          Find cash-share setups that fit up to ₹50 total planned risk after
+          estimated charges and slippage. Uses the same cash-pullback-v1 setup
+          rules.
+        </p>
+      </header>
+      <section className={card}>
+        <h2 className="font-semibold">Your three-share study stays separate</h2>
+        <p className="mt-2 text-sm text-slate-400">
+          This scanner does not change Watchlist, save trades, or add to the
+          study’s 100-trade / 50-session results. Continue the fixed study in{' '}
+          <Link href="/signals" className="text-teal-300 underline">
+            Practice
+          </Link>
+          . Scanner candidates outside that list are exploratory observations.
+        </p>
+        <p className="mt-2 text-xs text-slate-400">
+          The scan is a standalone cash/risk scenario. It does not reserve cash
+          or apply the journal’s remaining daily, weekly or drawdown limits.
+          Enter a lower available budget when needed.
+        </p>
+      </section>
+      <section className={card}>
+        <h2 className="font-semibold">Budget and cost assumptions</h2>
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          {Object.keys(DEFAULT_SCAN_CONFIG).map((key) => (
+            <label className="text-xs" key={key}>
+              {
+                {
+                  riskBudget: 'Total risk budget (₹, max 50)',
+                  cash: 'Available cash (₹, max 9500)',
+                  slippage: 'Slippage reserve (₹)',
+                  roundingReserve: 'Tax-rounding reserve (₹)',
+                  extraCharges: 'Extra round-trip charges (₹)',
+                }[key]
+              }
+              <input
+                className={input}
+                type="number"
+                min="0"
+                step="0.01"
+                disabled={busy}
+                value={values[key]}
+                onChange={(e) => {
+                  setValues((v) => ({ ...v, [key]: e.target.value }));
+                  setSnapshot(null);
+                }}
+              />
+            </label>
           ))}
         </div>
-
-        <div className="mt-5 rounded-2xl border border-yellow-500/20 bg-yellow-500/10 p-4 text-sm text-yellow-200">
-          This is the legacy market overview. Its full-market scans are currently
-          unavailable. Use{' '}
-          <Link href="/signals" className="font-semibold underline">Practice</Link>{' '}
-          for automatic checks of your fixed study shares and the ₹50 paper
-          workflow. Legacy signals do not qualify Practice entries.
+        {config.error && (
+          <p role="alert" className="mt-3 text-amber-200">
+            {config.error}
+          </p>
+        )}
+        <p className="mt-3 text-xs text-slate-400">
+          One buy and one sell order, no leverage. Standard{' '}
+          <a
+            href={CHARGE_SCHEDULE.source}
+            target="_blank"
+            rel="noreferrer"
+            className="text-teal-300 underline"
+          >
+            Angel One published charges
+          </a>{' '}
+          checked {CHARGE_SCHEDULE.reviewedAt}; your account costs remain
+          unverified. Keep realistic reserves. A valid result may contain zero
+          candidates.
+        </p>
+      </section>
+      <section className={card}>
+        <h2 className="font-semibold">Cost headroom</h2>
+        <p className="mt-2 text-sm text-slate-300">
+          At a 2R price target, this budget permits total costs of at most{' '}
+          {money(((config.value?.riskBudget || 0) * 0.8) / 3)} to meet net
+          reward/risk 1.2. Whole-share rounding or a higher entry ask can make
+          it stricter.
+        </p>
+        <p className="mt-2 text-xs text-slate-400">
+          The standard two-order brokerage + GST floor is ₹11.80. Your fixed
+          slippage, rounding and extra-charge allowances add{' '}
+          {money(
+            (config.value?.slippage || 0) +
+              (config.value?.roundingReserve || 0) +
+              (config.value?.extraCharges || 0)
+          )}
+          , before other levies. The defaults leave almost no headroom. Verify
+          costs independently; do not reduce them just to create candidates.
+        </p>
+      </section>
+      <section className={card}>
+        <p className="text-sm">
+          {now
+            ? getIndianMarketStatus(now).replaceAll('_', ' ')
+            : 'Checking session…'}{' '}
+          · shortlist window 09:45–11:15 IST
+        </p>
+        <p className="mt-2 text-xs text-slate-400">
+          A full scan loads all 50 shares in paced batches, then refreshes
+          quotes. Allow a few minutes and keep this tab visible. Recheck a
+          candidate before reviewing it: quotes expire after 30 seconds, and
+          results update as they age.
+        </p>
+        <div className="mt-4 flex flex-wrap gap-3">
+          <button
+            className={button}
+            disabled={busy || !config.value}
+            onClick={() => void run()}
+          >
+            {busy
+              ? 'Scanning…'
+              : now && isFreshSignalWindowOpenIST(now)
+                ? 'Scan Nifty 50'
+                : 'Check Nifty 50 feeds'}
+          </button>
+          {busy && (
+            <button
+              className="text-sm text-amber-200 underline"
+              onClick={() => controller.current?.abort()}
+            >
+              Cancel scan
+            </button>
+          )}
+          <button
+            className="text-sm text-teal-300 underline disabled:opacity-40"
+            disabled={!snapshot || busy}
+            onClick={exportScan}
+          >
+            Export scan snapshot
+          </button>
         </div>
-
-        {quoteSummary && (
-          <div
-            className={`mt-4 rounded-2xl border p-4 text-sm ${
-              quoteErrors.length > 0
-                ? 'border-orange-500/30 bg-orange-500/10 text-orange-200'
-                : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
-            }`}
-          >
-            <div className="flex items-start gap-3">
-              <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0" />
-
-              <div>
-                <p className="font-bold">
-                  Loaded {quoteSummary.fetched} / {quoteSummary.requested} instruments
-                </p>
-
-                <p className="mt-1 text-xs opacity-80">
-                  Angel requests are grouped by exchange and chunked in batches of{' '}
-                  {quoteSummary.chunkSize}.
-                </p>
-
-                {quoteErrors.length > 0 && (
-                  <div className="mt-3">
-                    <p className="font-semibold">Some quote chunks failed:</p>
-
-                    <ul className="mt-2 space-y-1">
-                      {quoteErrors.slice(0, 4).map((item, index) => (
-                        <li key={index}>
-                          • {item.exchange || 'UNKNOWN'}
-                          {item.symbol ? ` / ${item.symbol}` : ''}
-                          {item.chunk ? ` chunk ${item.chunk}` : ''}:{' '}
-                          {item.error || 'Unknown error'}
-                        </li>
-                      ))}
-                    </ul>
-
-                    {quoteErrors.length > 4 && (
-                      <p className="mt-2 text-xs opacity-80">
-                        +{quoteErrors.length - 4} more quote errors hidden.
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
+        <label className="mt-3 flex gap-2 text-xs text-slate-300">
+          <input
+            type="checkbox"
+            checked={auto}
+            onChange={(e) => {
+              setAuto(e.target.checked);
+              if (e.target.checked && isFreshSignalWindowOpenIST()) void run();
+            }}
+          />
+          Repeat full scan five minutes after completion while visible in the
+          entry window
+        </label>
+        {progress && (
+          <p role="status" className="mt-3 text-sm">
+            {progress.stage === 'CANDLES' ? 'Candle history' : 'Fresh quotes'}:{' '}
+            {progress.done} / {progress.total}
+          </p>
         )}
-
-        <Section
-          title="Market Snapshot"
-          subtitle={
-            quoteSummary
-              ? `${quoteSummary.fetched}/${quoteSummary.requested} instruments loaded`
-              : `${quoteList.length} instruments loaded`
-          }
-          icon={<BarChart3 className="h-5 w-5" />}
-        >
-          {loading && quoteList.length === 0 ? (
-            <div className="rounded-3xl border border-slate-800 bg-[#15161b] p-6 text-slate-400">
-              Loading market data...
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="rounded-3xl border border-slate-800 bg-[#15161b] p-5">
-                <p className="text-sm text-slate-500">Advancing</p>
-                <p className="mt-1 text-3xl font-bold text-green-400">
-                  {quoteList.filter((q) => q.change > 0).length}
-                </p>
-              </div>
-
-              <div className="rounded-3xl border border-slate-800 bg-[#15161b] p-5">
-                <p className="text-sm text-slate-500">Declining</p>
-                <p className="mt-1 text-3xl font-bold text-red-400">
-                  {quoteList.filter((q) => q.change < 0).length}
-                </p>
-              </div>
-            </div>
-          )}
-        </Section>
-
-        <Section
-          title="Top Gainers"
-          icon={<ArrowUpRight className="h-5 w-5" />}
-        >
-          <div className="space-y-3">
-            {topGainers.map((quote) => (
-              <CompactRow key={quote.symbol} quote={quote} />
+        {error && (
+          <p role="alert" className="mt-3 text-sm text-amber-200">
+            {error}
+          </p>
+        )}
+        {snapshot && (
+          <p className="mt-3 text-xs text-slate-400">
+            50 official constituents verified{' '}
+            {displayTime(snapshot.universe.checkedAt)} ·{' '}
+            <a
+              className="underline"
+              href={snapshot.universe.source}
+              target="_blank"
+              rel="noreferrer"
+            >
+              source CSV
+            </a>
+            . Last fetch completed {displayTime(snapshot.data.completedAt)}.
+          </p>
+        )}
+      </section>
+      <section className="space-y-3" aria-label="Scanner shortlist">
+        <h2 className="text-lg font-semibold">
+          Shortlist · {shortlist.length}
+        </h2>
+        <p className="text-xs text-slate-400">
+          Sorted by estimated net reward/risk, then tighter spread. These are
+          not win probabilities. Showing up to five; all results are below.
+        </p>
+        {!snapshot ? (
+          <p className={card}>
+            {busy
+              ? 'Building the scan; no candidates are approved while it is incomplete.'
+              : 'Run a scan to evaluate the current official Nifty 50 list.'}
+          </p>
+        ) : !shortlist.length ? (
+          <p className={card}>
+            {now && !isFreshSignalWindowOpenIST(now)
+              ? 'Outside the entry window. This is a feed check only.'
+              : unavailable === 50
+                ? 'All results have missing or stale data. Refresh before drawing conclusions.'
+                : 'No currently qualified candidate under these assumptions. Review exclusions below.'}
+          </p>
+        ) : (
+          shortlist.slice(0, 5).map((r) => (
+            <article
+              key={r.symbol}
+              className="rounded-2xl border border-teal-800 bg-teal-950/20 p-4"
+            >
+              <h3 className="font-bold">{r.symbol} · fits estimated budget</h3>
+              <p className="mt-1 text-xs text-slate-400">
+                {
+                  snapshot.universe.members.find((m) => m.symbol === r.symbol)
+                    ?.name
+                }
+              </p>
+              {detail(r)}
+            </article>
+          ))
+        )}
+      </section>
+      {snapshot && (
+        <details className={card}>
+          <summary className="cursor-pointer font-semibold">
+            All 50 results · {unavailable} unavailable / stale
+          </summary>
+          <div className="mt-3 space-y-3">
+            {results.map((r) => (
+              <details
+                className="border-t border-slate-800 pt-3"
+                key={r.symbol}
+              >
+                <summary className="cursor-pointer text-sm">
+                  {r.symbol} · {labels[r.status]}
+                </summary>
+                {detail(r)}
+              </details>
             ))}
           </div>
-        </Section>
-
-        <Section
-          title="Top Losers"
-          icon={<ArrowDownRight className="h-5 w-5" />}
-        >
-          <div className="space-y-3">
-            {topLosers.map((quote) => (
-              <CompactRow key={quote.symbol} quote={quote} />
-            ))}
-          </div>
-        </Section>
-
-        {naturalResources.length > 0 && (
-          <Section
-            title="Natural Resources"
-            subtitle="MCX commodities"
-            icon={<Gem className="h-5 w-5" />}
-          >
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              {naturalResources.map((quote) => (
-                <MarketCard key={quote.symbol} quote={quote} />
-              ))}
-            </div>
-          </Section>
-        )}
-
-        <Section
-          title="Near Day High"
-          subtitle="Possible momentum watchlist"
-          icon={<TrendingUp className="h-5 w-5" />}
-        >
-          {nearHigh.length === 0 ? (
-            <div className="rounded-3xl border border-slate-800 bg-[#15161b] p-6 text-slate-400">
-              No instruments near day high right now.
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {nearHigh.map((quote) => (
-                <CompactRow key={quote.symbol} quote={quote} />
-              ))}
-            </div>
-          )}
-        </Section>
-
-        <Section
-          title="Near Day Low"
-          subtitle="Possible weakness watchlist"
-          icon={<TrendingDown className="h-5 w-5" />}
-        >
-          {nearLow.length === 0 ? (
-            <div className="rounded-3xl border border-slate-800 bg-[#15161b] p-6 text-slate-400">
-              No instruments near day low right now.
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {nearLow.map((quote) => (
-                <CompactRow key={quote.symbol} quote={quote} />
-              ))}
-            </div>
-          )}
-        </Section>
-
-        <Section
-          title="Near Signal Setups"
-          subtitle="Diagnostics for symbols that did not qualify yet"
-          icon={<BarChart3 className="h-5 w-5" />}
-        >
-          {nearSignals.length === 0 ? (
-            <div className="rounded-3xl border border-slate-800 bg-[#15161b] p-6 text-slate-400">
-              No near setups to show right now.
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {nearSignals.map((signal) => (
-                <div
-                  key={signal.symbol}
-                  className="rounded-3xl border border-slate-800 bg-[#15161b] p-5"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h3 className="text-xl font-bold text-white">
-                        {signal.symbol}
-                      </h3>
-                      <p className="mt-1 text-sm text-slate-400">
-                        {signal.status.replaceAll('_', ' ')}
-                      </p>
-                    </div>
-
-                    <span className="rounded-full bg-slate-700 px-3 py-1 text-sm font-bold text-slate-300">
-                      NO TRADE
-                    </span>
-                  </div>
-
-                  <ul className="mt-4 space-y-2 text-sm text-slate-400">
-                    {signal.reasons.slice(0, 6).map((reason, index) => (
-                      <li key={index}>• {reason}</li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-            </div>
-          )}
-        </Section>
-
-        <Section
-          title="BUY Watch Signals"
-          icon={<TrendingUp className="h-5 w-5" />}
-        >
-          {buySignals.length === 0 ? (
-            <div className="rounded-3xl border border-slate-800 bg-[#15161b] p-6 text-slate-400">
-              No BUY watch signals right now.
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {buySignals.map((signal) => (
-                <div
-                  key={signal.symbol}
-                  className="rounded-3xl border border-green-500/20 bg-green-500/10 p-5"
-                >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="text-xl font-bold text-white">
-                        {signal.symbol}
-                      </h3>
-                      <p className="mt-1 text-sm text-green-300">
-                        Entry {formatPrice(signal.entry)} • SL{' '}
-                        {formatPrice(signal.stopLoss)} • T1{' '}
-                        {formatPrice(signal.target1)}
-                      </p>
-                    </div>
-
-                    <span className="rounded-full bg-green-500/20 px-3 py-1 text-sm font-bold text-green-400">
-                      BUY
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </Section>
-
-        <Section
-          title="SELL Watch Signals"
-          icon={<ShieldAlert className="h-5 w-5" />}
-        >
-          {sellSignals.length === 0 ? (
-            <div className="rounded-3xl border border-slate-800 bg-[#15161b] p-6 text-slate-400">
-              No SELL watch signals right now.
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {sellSignals.map((signal) => (
-                <div
-                  key={signal.symbol}
-                  className="rounded-3xl border border-red-500/20 bg-red-500/10 p-5"
-                >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="text-xl font-bold text-white">
-                        {signal.symbol}
-                      </h3>
-                      <p className="mt-1 text-sm text-red-300">
-                        Entry {formatPrice(signal.entry)} • SL{' '}
-                        {formatPrice(signal.stopLoss)} • T1{' '}
-                        {formatPrice(signal.target1)}
-                      </p>
-                    </div>
-
-                    <span className="rounded-full bg-red-500/20 px-3 py-1 text-sm font-bold text-red-400">
-                      SELL
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </Section>
-      </div>
-    </main>
+        </details>
+      )}
+      <p className="text-xs text-slate-500">
+        Market data and membership failures are shown explicitly. No bullish or
+        bearish score is substituted for the fixed setup. Exported scans remain
+        separate from study backups. No scanner orders or paper fills are
+        recorded automatically.
+      </p>
+    </div>
   );
 }

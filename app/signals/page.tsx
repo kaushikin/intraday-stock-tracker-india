@@ -280,8 +280,8 @@ export default function SignalsPage() {
         </p>
         <p className="mt-2 text-xs text-slate-400">
           The first saved research record fixes the study shares. Keep that list
-          unchanged while collecting evidence. The Market tab is a separate
-          legacy overview and does not qualify this study’s paper entries.
+          unchanged while collecting evidence. The Scan tab screens the current
+          Nifty 50 separately and does not qualify this study’s paper entries.
         </p>
         <a
           className="mt-3 inline-block text-sm text-teal-300 underline"
