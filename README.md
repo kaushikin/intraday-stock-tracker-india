@@ -6,6 +6,8 @@ Repository: https://github.com/kaushikin/intraday-stock-tracker-india
 
 ## Practice workflow
 
+Start with the [Monday verification checklist](docs/monday-checklist.md), also linked from Practice. It covers share selection, Angel One data comparison, broker charges and the entry checklist.
+
 1. Keep three supported NSE cash shares at the front of the watchlist. Defaults are RELIANCE, TCS and HDFCBANK. The first three eligible entries form the study universe, which is fixed when the first research record is saved. Later watchlist edits do not change it.
 2. Review company results and scheduled events before the 09:45–11:15 IST research window. Enter notes and verify the broker's round-trip cost estimate.
 3. Open **Research readiness** and compare each study share with Angel One during market hours. Capture the app snapshot, independently enter the same completed stock/NIFTY candle start time and OHLC values, stock volume, LTP and exchange timestamp. A matching comparison is required each day before a paper entry for that share.
@@ -15,6 +17,10 @@ Repository: https://github.com/kaushikin/intraday-stock-tracker-india
 7. Export the journal regularly. Log the session after 11:45 IST, including feed failures, missed opportunities and rule adherence; review operations after five distinct sessions without changing strategy parameters. Review performance after at least 100 closed paper trades across 50 entry sessions, including costs, drawdown and net expectancy. These counts are a research checkpoint, not evidence by themselves that live trading is suitable.
 
 The study uses `cash-pullback-v1`, documented in [docs/paper-research.md](docs/paper-research.md). Futures and CE/PE are excluded from this first phase.
+
+Practice automatically checks the fixed study shares while the tab is visible during regular market hours (quote requests about every 10 seconds, candle requests about every 30 seconds, subject to provider delays). It does not select a different universe each day, record fills automatically or monitor a closed app. NIFTY is confirmation, not a cash share to enter. A saved study universe takes precedence over subsequent Watchlist edits.
+
+The separate Market page is legacy. Its Nifty 50 / All modes currently submit more than the quote API's 20-symbol request limit, so those broad scans are unavailable; Quick Watch is a separate hardcoded list and uses the old signal engine. Use Practice for this study. This release documents that limitation without changing the frozen strategy or claiming a repaired market-wide scanner.
 
 ## Risk and costs
 

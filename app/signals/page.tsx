@@ -265,6 +265,33 @@ export default function SignalsPage() {
           broker orders and no promised win rate.
         </p>
       </header>
+      <section className={card} aria-label="Study shares and automatic checks">
+        <h2 className="font-semibold">Study shares and automatic checks</h2>
+        <p className="mt-2 text-sm text-slate-300">
+          Shares being checked: {symbols.join(', ') || 'Choose up to three NSE cash shares in Watchlist'}.
+          NIFTY supplies index confirmation. These shares are your research list;
+          each needs a qualifying setup, verified data and affordable costs.
+        </p>
+        <p className="mt-2 text-xs text-slate-400">
+          Keep Practice visible during market hours. Quotes are requested about
+          every 10 seconds and candles about every 30 seconds; provider delays
+          still apply. Eligible paper entries are limited to 09:45–11:15 IST.
+          Checks pause when the tab is hidden. Entries and exits require your action.
+        </p>
+        <p className="mt-2 text-xs text-slate-400">
+          The first saved research record fixes the study shares. Keep that list
+          unchanged while collecting evidence. The Market tab is a separate
+          legacy overview and does not qualify this study’s paper entries.
+        </p>
+        <a
+          className="mt-3 inline-block text-sm text-teal-300 underline"
+          href="https://github.com/kaushikin/intraday-stock-tracker-india/blob/main/docs/monday-checklist.md"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Open Monday’s verification checklist
+        </a>
+      </section>
       <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
         <span className="rounded-full bg-slate-800 px-3 py-2">
           {now

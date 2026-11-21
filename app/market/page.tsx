@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import {
   ArrowDownRight,
   ArrowUpRight,
@@ -460,7 +461,11 @@ export default function MarketPage() {
         </div>
 
         <div className="mt-5 rounded-2xl border border-yellow-500/20 bg-yellow-500/10 p-4 text-sm text-yellow-200">
-          Market scanner is for education and tracking only. Not financial advice.
+          This is the legacy market overview. Its full-market scans are currently
+          unavailable. Use{' '}
+          <Link href="/signals" className="font-semibold underline">Practice</Link>{' '}
+          for automatic checks of your fixed study shares and the ₹50 paper
+          workflow. Legacy signals do not qualify Practice entries.
         </div>
 
         {quoteSummary && (
