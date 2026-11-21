@@ -394,6 +394,7 @@ export function parsePaperBook(
   const book = JSON.parse(raw);
   if (
     book?.version !== 1 ||
+    book.kind !== undefined ||
     !Array.isArray(book.positions) ||
     !Array.isArray(book.observations)
   )
@@ -411,6 +412,7 @@ export function parsePaperBook(
       throw new Error('Paper journal contains invalid setup or entry times.');
     if (
       p?.mode !== 'PAPER' ||
+      'origin' in p ||
       typeof p.id !== 'string' ||
       ids.has(p.id) ||
       p.setup?.version !== STRATEGY_VERSION ||

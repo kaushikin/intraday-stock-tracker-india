@@ -17,7 +17,7 @@ This is a testable hypothesis, not a validated trading edge. Preserve rules thro
 
 ## Accounting and exits
 
-All limits use the separate practice journal. ₹50 or 0.5% equity is a total planned loss cap including costs and slippage; remaining daily, weekly, monthly and drawdown headroom may reduce it. Quantity rounds down to whole shares and must fit 95% of equity in cash including costs. This does not model futures margin or option risk.
+Study statistics use only the separate Practice journal. An additional shared entry guard reads both paper journals for combined cash/loss headroom, one open position and two entries/day; it never adds scanner records to this study. The existing Practice sizing rules still apply and a proposal exceeding the shared budget is blocked. ₹50 or 0.5% equity is a total planned loss cap including costs and slippage; remaining daily, weekly, monthly and drawdown headroom may reduce it. Quantity rounds down to whole shares and must fit 95% of equity in cash including costs. This does not model futures margin or option risk.
 
 One open position and two entries/day are enforced. Entries retain an immutable setup snapshot and cannot be closed twice. Exit the whole position at an observed stop/target or after 30 minutes; record price, total round-trip charges and actual IST time. Time/manual exits stay in the denominator. Net P/L is `(exit − entry) × quantity − total charges`. Observed prices already reflect price slippage; the initial reserve is not deducted again at exit.
 

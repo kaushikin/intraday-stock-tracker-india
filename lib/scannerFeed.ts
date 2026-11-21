@@ -238,3 +238,39 @@ export async function fetchScannerData(
   data.completedAt = runtime.now().toISOString();
   return data;
 }
+
+// Open-position supervision needs fresh quotes without repeating all candle history.
+export async function fetchScannerQuote(
+  symbol: string,
+  signal: AbortSignal,
+  overrides: Partial<Runtime> = {}
+): Promise<PriceData> {
+  if (
+    !/^[A-Z0-9][A-Z0-9&.-]{0,29}$/.test(symbol) ||
+    ['NIFTY', 'BANKNIFTY'].includes(symbol)
+  )
+    throw new Error('Invalid cash share.');
+  const result = await jsonRequest(
+    '/api/market/quote',
+    { items: [{ symbol, exchange: 'NSE', token: symbol }] },
+    signal,
+    { ...defaults, ...overrides }
+  );
+  const q = Array.isArray(result.quotes)
+    ? result.quotes.find((q: any) => q.symbol === symbol)
+    : undefined;
+  const errors = requestErrors(result, [symbol], q ? [symbol] : []);
+  if (errors.length || !q)
+    throw new Error(errors.map((e) => e.message).join(' ') || 'Quote missing.');
+  return {
+    price: Number(q.price),
+    change: Number(q.changePercent),
+    ask: Number(q.ask),
+    bid: Number(q.bid),
+    askQuantity: Number(q.askQuantity),
+    tickSize: Number(q.tickSize),
+    instrumentAsOf: q.instrumentAsOf,
+    exchangeTime: q.exchangeTime,
+    lastUpdated: q.lastUpdated,
+  };
+}

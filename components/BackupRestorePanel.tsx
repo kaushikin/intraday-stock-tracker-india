@@ -5,6 +5,13 @@ import { AlertTriangle, Database, Download, Upload } from 'lucide-react';
 import { TRADE_RULE_SETTINGS_KEY } from '@/lib/tradeRules';
 import { PAPER_BOOK_KEY, parsePaperBook } from '@/lib/paperBook';
 
+import {
+  assertNoSharedOverlap,
+  parseScannerBook,
+  SCANNER_BOOK_KEY,
+  SCANNER_BOOK_KIND,
+} from '@/lib/scannerJournal';
+
 const BACKUP_VERSION = 2;
 
 const STORAGE_KEYS = {
@@ -136,6 +143,10 @@ export default function BackupRestorePanel() {
     try {
       const text = await file.text();
       const parsed = JSON.parse(text);
+      if (parsed?.kind === SCANNER_BOOK_KIND)
+        throw new Error(
+          'Restore scanner journal backups in Scan → Scanner paper journal. They cannot be imported into Practice.'
+        );
 
       if (parsed?.version === 1 && Array.isArray(parsed.positions)) {
         const paper = parsePaperBook(text);
@@ -148,6 +159,10 @@ export default function BackupRestorePanel() {
         if (!navigator.locks)
           throw new Error('Browser journal lock unavailable.');
         await navigator.locks.request(PAPER_BOOK_KEY, async () => {
+          assertNoSharedOverlap(
+            parseScannerBook(localStorage.getItem(SCANNER_BOOK_KEY)),
+            paper
+          );
           localStorage.setItem(PAPER_BOOK_KEY, JSON.stringify(paper));
         });
         window.dispatchEvent(new Event('paperBookUpdated'));
@@ -182,36 +197,39 @@ export default function BackupRestorePanel() {
 
       if (!confirmed) return;
 
-      localStorage.setItem(
-        STORAGE_KEYS.watchlist,
-        JSON.stringify(parsed.data.watchlist || [])
-      );
-
-      localStorage.setItem(
-        STORAGE_KEYS.trades,
-        JSON.stringify(parsed.data.trades || [])
-      );
-
-      localStorage.setItem(
-        STORAGE_KEYS.trackedSignals,
-        JSON.stringify(parsed.data.trackedSignals || [])
-      );
-
-      if (parsed.data.tradeRuleSettings) {
+      if (!navigator.locks)
+        throw new Error('Browser journal lock unavailable.');
+      await navigator.locks.request(PAPER_BOOK_KEY, async () => {
+        if (paper)
+          assertNoSharedOverlap(
+            parseScannerBook(localStorage.getItem(SCANNER_BOOK_KEY)),
+            paper
+          );
         localStorage.setItem(
-          STORAGE_KEYS.tradeRuleSettings,
-          JSON.stringify(parsed.data.tradeRuleSettings)
+          STORAGE_KEYS.watchlist,
+          JSON.stringify(parsed.data.watchlist || [])
         );
-      }
 
-      if (paper) {
-        if (!navigator.locks)
-          throw new Error('Browser journal lock unavailable.');
-        await navigator.locks.request(PAPER_BOOK_KEY, async () => {
-          localStorage.setItem(PAPER_BOOK_KEY, JSON.stringify(paper));
-        });
-        window.dispatchEvent(new Event('paperBookUpdated'));
-      }
+        localStorage.setItem(
+          STORAGE_KEYS.trades,
+          JSON.stringify(parsed.data.trades || [])
+        );
+
+        localStorage.setItem(
+          STORAGE_KEYS.trackedSignals,
+          JSON.stringify(parsed.data.trackedSignals || [])
+        );
+
+        if (parsed.data.tradeRuleSettings) {
+          localStorage.setItem(
+            STORAGE_KEYS.tradeRuleSettings,
+            JSON.stringify(parsed.data.tradeRuleSettings)
+          );
+        }
+
+        if (paper) localStorage.setItem(PAPER_BOOK_KEY, JSON.stringify(paper));
+      });
+      if (paper) window.dispatchEvent(new Event('paperBookUpdated'));
       window.dispatchEvent(new Event('tradeRulesUpdated'));
       window.dispatchEvent(new Event('storage'));
 
@@ -222,7 +240,11 @@ export default function BackupRestorePanel() {
       }, 800);
     } catch (error) {
       console.error(error);
-      setErrorMessage('Could not import backup. File may be damaged.');
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : 'Could not import backup. File may be damaged.'
+      );
     }
   }
 
@@ -239,7 +261,8 @@ export default function BackupRestorePanel() {
           <p className="mt-2 text-sm text-slate-400">
             Export your paper journal, local trades, watchlist, tracked signals,
             and trade rule settings to a backup file. Use restore when changing
-            browser/device.
+            browser/device. The scanner paper journal has its own separate
+            backup and restore in Scan; this export does not include it.
           </p>
 
           <div className="mt-4 rounded-2xl border border-yellow-500/20 bg-yellow-500/10 p-4 text-sm text-yellow-200">

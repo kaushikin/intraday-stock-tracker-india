@@ -10,7 +10,7 @@ If you have not fixed a study universe yet, keep the app's existing defaults: **
 
 **Practice is the screen to keep open.** It evaluates the fixed cash shares using the unchanged `cash-pullback-v1` rules and NIFTY confirmation. Quote requests run about every 10 seconds and candle requests about every 30 seconds while the tab is visible during regular market hours. Provider delays can make data stale. Entry eligibility is limited to 09:45–11:15. Hidden tabs pause polling, and the app does not monitor after you close it. It never places broker orders or automatically records paper fills.
 
-The **Scan** tab now screens the official Nifty 50 list separately using the same setup rules and estimated ₹50 cost/risk filters. It cannot change your study shares or add entries to its journal. Use Practice for the existing three-share sample. Scanner candidates outside that list remain exploratory observations; do not switch study shares to chase them. See [scanner operation](nifty50-scanner.md).
+The **Scan** tab now screens the official Nifty 50 list separately using the same setup rules and estimated ₹50 cost/risk filters. It has a separate paper journal and cannot change your study shares or add entries to the Practice journal. Use Practice for the existing three-share sample. Scanner candidates outside that list remain exploratory observations; do not switch study shares to chase them. See [scanner operation](nifty50-scanner.md) and the [in-app scanner paper journal workflow and preparation review](scanner-paper-journal.md). Shared entry guards prevent using the same simulated cash/risk twice.
 
 ## 1. 08:50 — Open the workspace
 

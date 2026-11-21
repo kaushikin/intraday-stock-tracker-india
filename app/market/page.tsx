@@ -21,6 +21,7 @@ import {
   type ScanProgress,
   type ScannerData,
 } from '@/lib/scannerFeed';
+import ScannerJournal from '@/components/ScannerJournal';
 import type { NiftyUniverse } from '@/lib/nifty50';
 import { CHARGE_SCHEDULE } from '@/lib/brokerCharges';
 import { displayTime } from '@/components/DataStatusPanel';
@@ -53,7 +54,8 @@ export default function MarketPage() {
     [error, setError] = useState(''),
     [progress, setProgress] = useState<ScanProgress | null>(null),
     [now, setNow] = useState<Date | null>(null),
-    [auto, setAuto] = useState(false);
+    [auto, setAuto] = useState(false),
+    [selected, setSelected] = useState('');
   const controller = useRef<AbortController | null>(null),
     mounted = useRef(false);
   const config = useMemo(() => {
@@ -274,6 +276,13 @@ export default function MarketPage() {
         >
           Recheck {r.symbol}
         </button>
+        <a
+          href="#scanner-journal"
+          className="ml-4 text-sm text-teal-300 underline"
+          onClick={() => setSelected(r.symbol)}
+        >
+          Review paper entry
+        </a>
       </>
     );
   }
@@ -293,7 +302,7 @@ export default function MarketPage() {
       <section className={card}>
         <h2 className="font-semibold">Your three-share study stays separate</h2>
         <p className="mt-2 text-sm text-slate-400">
-          This scanner does not change Watchlist, save trades, or add to the
+          Scanner trades use their own paper journal below and never add to the
           study’s 100-trade / 50-session results. Continue the fixed study in{' '}
           <Link href="/signals" className="text-teal-300 underline">
             Practice
@@ -301,9 +310,9 @@ export default function MarketPage() {
           . Scanner candidates outside that list are exploratory observations.
         </p>
         <p className="mt-2 text-xs text-slate-400">
-          The scan is a standalone cash/risk scenario. It does not reserve cash
-          or apply the journal’s remaining daily, weekly or drawdown limits.
-          Enter a lower available budget when needed.
+          The shortlist uses the entered scenario. Before a paper entry, the
+          scanner journal applies the remaining combined cash and loss limits
+          across both journals. Study shares can only be entered in Practice.
         </p>
       </section>
       <section className={card}>
@@ -515,6 +524,15 @@ export default function MarketPage() {
           </div>
         </details>
       )}
+      <ScannerJournal
+        selected={selected}
+        context={
+          snapshot && selected ? { ...snapshot, symbol: selected } : null
+        }
+        now={now}
+        scanBusy={busy}
+        recheck={() => void run(selected)}
+      />
       <p className="text-xs text-slate-500">
         Market data and membership failures are shown explicitly. No bullish or
         bearish score is substituted for the fixed setup. Exported scans remain

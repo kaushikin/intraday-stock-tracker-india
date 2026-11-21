@@ -24,6 +24,13 @@ import {
 import { getIndianMarketStatus, istDateKey } from '@/lib/marketHours';
 import { analyzeMarketCondition } from '@/lib/marketCondition';
 import { quoteProblem } from '@/lib/marketDataQuality';
+import { useScannerBook } from '@/hooks/useScannerBook';
+import {
+  parseScannerBook,
+  SCANNER_BOOK_KEY,
+  sharedAccount,
+  sharedEntryReasons,
+} from '@/lib/scannerJournal';
 import { usePaperBook } from '@/hooks/usePaperBook';
 import NewsContext from '@/components/NewsContext';
 import DataStatusPanel, {
@@ -83,6 +90,7 @@ export default function SignalsPage() {
     updateCandles,
   } = useApp();
   const { book, ready, error: storageError, transact } = usePaperBook();
+  const scannerJournal = useScannerBook();
   const [now, setNow] = useState<Date | null>(null),
     [error, setError] = useState(''),
     [message, setMessage] = useState(''),
@@ -124,6 +132,10 @@ export default function SignalsPage() {
     [book, now]
   );
   const stats = useMemo(() => paperStats(book), [book]);
+  const combined = useMemo(
+    () => sharedAccount(scannerJournal.book, book, now || new Date(0)),
+    [scannerJournal.book, book, now]
+  );
   const regime = useMemo(
     () => analyzeMarketCondition(candles.NIFTY || [], now || new Date(0)),
     [candles, now]
@@ -172,7 +184,7 @@ export default function SignalsPage() {
               latestSetup.reasons.join(' ') ||
                 'The current setup changed. Review it again.'
             );
-          return openPaperPosition(
+          const changed = openPaperPosition(
             latest,
             setup,
             prices[setup.symbol],
@@ -181,6 +193,17 @@ export default function SignalsPage() {
             notes,
             new Date()
           );
+          const recorded = changed.positions.at(-1)!;
+          const sharedReasons = sharedEntryReasons(
+            parseScannerBook(localStorage.getItem(SCANNER_BOOK_KEY)),
+            latest,
+            recorded.plannedRisk,
+            recorded.quantity * recorded.entry +
+              recorded.estimatedCharges +
+              recorded.slippageAllowance
+          );
+          if (sharedReasons.length) throw new Error(sharedReasons.join(' '));
+          return changed;
         }),
       'Paper entry recorded at the observed ask. No broker order was sent.'
     );
@@ -268,15 +291,19 @@ export default function SignalsPage() {
       <section className={card} aria-label="Study shares and automatic checks">
         <h2 className="font-semibold">Study shares and automatic checks</h2>
         <p className="mt-2 text-sm text-slate-300">
-          Shares being checked: {symbols.join(', ') || 'Choose up to three NSE cash shares in Watchlist'}.
-          NIFTY supplies index confirmation. These shares are your research list;
-          each needs a qualifying setup, verified data and affordable costs.
+          Shares being checked:{' '}
+          {symbols.join(', ') ||
+            'Choose up to three NSE cash shares in Watchlist'}
+          . NIFTY supplies index confirmation. These shares are your research
+          list; each needs a qualifying setup, verified data and affordable
+          costs.
         </p>
         <p className="mt-2 text-xs text-slate-400">
           Keep Practice visible during market hours. Quotes are requested about
           every 10 seconds and candles about every 30 seconds; provider delays
           still apply. Eligible paper entries are limited to 09:45–11:15 IST.
-          Checks pause when the tab is hidden. Entries and exits require your action.
+          Checks pause when the tab is hidden. Entries and exits require your
+          action.
         </p>
         <p className="mt-2 text-xs text-slate-400">
           The first saved research record fixes the study shares. Keep that list
@@ -338,7 +365,9 @@ export default function SignalsPage() {
             </dd>
           </div>
           <div>
-            <dt className="text-slate-400">Next trade budget</dt>
+            <dt className="text-slate-400">
+              Study budget before shared limits
+            </dt>
             <dd className="mt-1 text-xl font-semibold text-teal-300">
               {money(account.riskBudget)}
             </dd>
@@ -356,6 +385,19 @@ export default function SignalsPage() {
           Total loss limits: ₹50/trade or 0.5% of equity, ₹100/day, ₹250/week,
           ₹500/month and ₹500 drawdown. One open position. No leverage or fixed
           daily profit target.
+        </p>
+        <p className="mt-3 text-xs text-amber-200">
+          Study performance above stays separate. Entry safety uses both
+          journals:
+          {scannerJournal.ready
+            ? ` combined equity ${money(combined.equity)}, remaining entry risk ${money(combined.riskBudget)}, ${combined.tradesToday}/2 entries today.`
+            : ' scanner journal unavailable; recover its backup before new entries.'}{' '}
+          An open scanner position blocks study entries, and an open study
+          position blocks scanner entries.{' '}
+          <Link className="underline" href="/market#scanner-journal">
+            Open scanner journal
+          </Link>
+          .
         </p>
         {account.reasons.map((reason) => (
           <p key={reason} className="mt-2 text-sm text-amber-300">
@@ -500,7 +542,25 @@ export default function SignalsPage() {
               )
             : undefined;
           const compared = !!now && comparisonReady(book, symbol, now);
+          const sharedReasons = !scannerJournal.ready
+            ? [
+                'Scanner journal unavailable: new entries are blocked until its backup is recovered.',
+              ]
+            : preview
+              ? sharedEntryReasons(
+                  scannerJournal.book,
+                  book,
+                  preview.sizing.netLossAtStop,
+                  preview.entry * preview.sizing.suggestedQuantity +
+                    Number(charges) +
+                    Number(slippage),
+                  now || new Date(0)
+                )
+              : [];
+          const entryAllowed =
+            !!preview?.allowed && compared && sharedReasons.length === 0;
           const reasons = [
+            ...sharedReasons,
             ...(preview?.reasons || decision.reasons),
             ...(!compared
               ? [
@@ -513,11 +573,9 @@ export default function SignalsPage() {
               <div className="flex justify-between gap-2">
                 <h3 className="font-bold">{symbol}</h3>
                 <span
-                  className={`text-xs ${preview?.allowed && compared ? 'text-teal-300' : 'text-amber-300'}`}
+                  className={`text-xs ${entryAllowed ? 'text-teal-300' : 'text-amber-300'}`}
                 >
-                  {preview?.allowed && compared
-                    ? 'Paper entry eligible'
-                    : 'Watch only'}
+                  {entryAllowed ? 'Paper entry eligible' : 'Watch only'}
                 </span>
               </div>
               {setup && (
@@ -568,7 +626,7 @@ export default function SignalsPage() {
                       !reviewed ||
                       !notes.trim() ||
                       !compared ||
-                      !preview?.allowed
+                      !entryAllowed
                     }
                     onClick={() => enter(setup)}
                     className={button}

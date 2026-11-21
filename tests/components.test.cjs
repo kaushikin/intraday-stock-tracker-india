@@ -329,6 +329,8 @@ test('provider state preserves the fixed study universe and clears failed quotes
 test('paper entry stays blocked until comparison passes and rechecks the latest stored evidence on click', async (t) => {
   const strategy = require('../lib/paperStrategy.ts');
   const research = require('../lib/researchEvidence.ts');
+  const scannerFixture = require('./scanner-journal-fixtures.cjs').entered('BSE');
+  const scannerJournal = require('../lib/scannerJournal.ts');
   const originalSetup = strategy.findPaperSetup;
   const originalContext = context.useApp;
   t.after(() => {
@@ -416,12 +418,14 @@ test('paper entry stays blocked until comparison passes and rechecks the latest 
   );
   localStorage.setItem(b.PAPER_BOOK_KEY, JSON.stringify(matched));
   await act(async () => window.dispatchEvent(new Event('paperBookUpdated')));
-  await act(async () =>
-    findButton(container, 'Record paper entry at ask').click()
-  );
-  assert.equal(
-    JSON.parse(localStorage.getItem(b.PAPER_BOOK_KEY)).positions.length,
-    1
-  );
+  // Simulate another tab opening a scanner trade before its storage event arrives.
+  localStorage.setItem(scannerJournal.SCANNER_BOOK_KEY, JSON.stringify(scannerFixture.book));
+  await act(async () => findButton(container, 'Record paper entry at ask').click());
+  assert.equal(JSON.parse(localStorage.getItem(b.PAPER_BOOK_KEY)).positions.length, 0);
+  assert.match(container.textContent, /Across both journals: Close the existing paper position/);
+  localStorage.removeItem(scannerJournal.SCANNER_BOOK_KEY);
+  await act(async () => window.dispatchEvent(new Event('scannerBookUpdated')));
+  await act(async () => findButton(container, 'Record paper entry at ask').click());
+  assert.equal(JSON.parse(localStorage.getItem(b.PAPER_BOOK_KEY)).positions.length, 1);
   assert.match(container.textContent, /No broker order was sent/);
 });

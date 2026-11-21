@@ -1,16 +1,16 @@
 # Nifty 50 scanner — separate exploratory screen
 
-Open **Scan** (`/market`). This replaces the legacy market overview and its broken >20-symbol request. The three-share Practice study, its rules, stored universe, journal and 100-trade/50-session sample remain unchanged.
+Open **Scan** (`/market`). This replaces the legacy market overview and its broken >20-symbol request. The three-share Practice strategy, stored universe, journal and 100-trade/50-session sample remain separate. Entry safety now checks both paper journals together; their statistics are never pooled. See the [scanner paper journal and readiness guide](scanner-paper-journal.md).
 
 ## Run a scan
 
-1. Confirm the standalone risk and cash scenario: up to ₹50 total planned risk and ₹9,500 unleveraged cash from the ₹10,000 baseline. Lower these if less is actually available. The scanner does not read/reserve journal cash or enforce its remaining loss limits.
+1. Confirm the standalone risk and cash scenario: up to ₹50 total planned risk and ₹9,500 unleveraged cash from the ₹10,000 baseline. Lower these if less is actually available. The shortlist is a standalone scenario. Its separate paper journal rechecks remaining combined cash/loss limits before an entry.
 2. Keep realistic slippage, tax-rounding and any extra round-trip charges. Defaults remain ₹1 / ₹0.50 / ₹0. Published Angel charges are estimates, not verified account costs. The cost-headroom panel explains why these defaults may yield no candidates.
 3. Click **Scan Nifty 50** in the 09:45–11:15 IST entry window. Outside it, **Check Nifty 50 feeds** performs a connection check only; there is no live shortlist. Keep the tab visible. A full run can take a few minutes.
 4. Optional repeat scans run five minutes after the previous run finishes, while visible and in the entry window. No overlapping scan starts. Hiding the tab or leaving the page cancels the current run. Reopen and run again; there is no background or closed-app monitoring.
 5. Review up to five current shortlist results, ordered by estimated net reward/risk, then spread and symbol. This ordering is not a calibrated probability of winning. Expand **All 50 results** for exclusions and provider failures.
 6. Use **Recheck SYMBOL** to fetch that stock's candles, NIFTY candles and a fresh quote. Quotes expire after 30 seconds; shortlist eligibility is recomputed every five seconds and can disappear. A full scan refreshes the entire universe. A one-share recheck retains other observations but does not make their quotes fresh.
-7. Independently verify the broker's stock/index bars, timestamps, exact account charges and scheduled events before interpreting a candidate. Export the scan snapshot if useful. Scanner exports contain observations and settings; they do not become trades or contribute to Practice statistics.
+7. Independently verify the broker's stock/index bars, timestamps, exact account charges and scheduled events before interpreting a candidate. Export the scan snapshot if useful. Scan snapshot exports contain observations and settings; they do not create trades. Use **Review paper entry** to complete comparisons and fees, then explicitly save in the separate scanner journal. Study shares must be entered in Practice.
 
 ## Membership and data
 
@@ -32,9 +32,9 @@ At ₹50 risk and a 2R price target, total costs must be at most ₹13.33 before
 
 ## Separation and limits
 
-- No calls to study transaction functions; no Watchlist or journal writes, auto-entry or broker order endpoints.
-- Scanner observations are kept in component memory and optional explicitly exported JSON. Reloading clears them. The two samples are not pooled.
-- The remaining account loss limits and open-position risk still need review before any eventual trading decision. Displayed fit refers only to the entered standalone scenario.
+- Scanner actions write only the scanner journal key. No Watchlist or study writes, automatic entries/exits, or broker orders. Practice and scanner entry paths use the same lock and combined risk check.
+- Raw scan snapshots are kept in component memory and optional exported JSON; reloading clears them. Explicit paper trades, comparisons, fee checks and notes persist separately in browser storage. Back up both journals; the samples are not pooled.
+- Displayed shortlist fit refers to the entered standalone scenario. The journal recomputes sizing using remaining shared cash/risk, enforces one open position and two entries/day across both journals, and requires saved broker comparisons and exact-plan fee evidence.
 - The existing calendar covers regular 2026 NSE sessions and fails closed in unverified years.
 - Published fees do not cover extra orders, delivery/DP, call-and-trade, account charges or special account offers/caps; keep differences in the extra-charge reserve and verify actual costs.
 - A live Monday broker-terminal comparison is still required. Off-hours tests establish connectivity, not a tradable setup, fill quality, profitability or a 70% win rate.
