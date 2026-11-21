@@ -7,14 +7,16 @@ import {
   istDateKey,
 } from '@/lib/marketHours';
 import {
-  DEFAULT_SCAN_CONFIG,
   rankShortlist,
-  SCANNER_VERSION,
-  screenCandidate,
-  validateScanConfig,
   type ScanConfig,
   type ScanResult,
 } from '@/lib/niftyScanner';
+import {
+  DEFAULT_SCAN_CONFIG_3R as DEFAULT_SCAN_CONFIG,
+  SCANNER_3R_SCREEN_VERSION as SCANNER_VERSION,
+  screenScanner3R as screenCandidate,
+  validateScanConfig3R as validateScanConfig,
+} from '@/lib/scanner3R';
 import {
   fetchScannerData,
   loadScannerUniverse,
@@ -290,13 +292,14 @@ export default function MarketPage() {
     <div className="space-y-5 pb-12">
       <header>
         <p className="text-xs uppercase tracking-widest text-teal-300">
-          Separate exploratory screen
+          Separate 3R paper version
         </p>
-        <h1 className="mt-2 text-3xl font-bold">Nifty 50 scanner</h1>
+        <h1 className="mt-2 text-3xl font-bold">Nifty 50 scanner · 3R</h1>
         <p className="mt-3 text-sm text-slate-300">
           Find cash-share setups that fit up to ₹50 total planned risk after
-          estimated charges and slippage. Uses the same cash-pullback-v1 setup
-          rules.
+          full charges and execution reserves. New entries use
+          scanner-cash-3r-v2; the three-stock study and old 2R records keep
+          their original rules.
         </p>
       </header>
       <section className={card}>
@@ -324,15 +327,15 @@ export default function MarketPage() {
                 {
                   riskBudget: 'Total risk budget (₹, max 50)',
                   cash: 'Available cash (₹, max 9500)',
-                  slippage: 'Slippage reserve (₹)',
-                  roundingReserve: 'Tax-rounding reserve (₹)',
+                  slippage: 'Execution reserve floor (₹, min 5)',
+                  roundingReserve: 'Tax-rounding reserve (₹, min 1)',
                   extraCharges: 'Extra round-trip charges (₹)',
                 }[key]
               }
               <input
                 className={input}
                 type="number"
-                min="0"
+                min={key === 'slippage' ? 5 : key === 'roundingReserve' ? 1 : 0}
                 step="0.01"
                 disabled={busy}
                 value={values[key]}
@@ -367,30 +370,28 @@ export default function MarketPage() {
       <section className={card}>
         <h2 className="font-semibold">Cost headroom</h2>
         <p className="mt-2 text-sm text-slate-300">
-          At a 2R price target, this budget permits total costs of at most{' '}
-          {money(((config.value?.riskBudget || 0) * 0.8) / 3)} to meet net
-          reward/risk 1.2. Whole-share rounding or a higher entry ask can make
-          it stricter.
+          At a 3R price target, this budget permits total costs and reserves of
+          at most {money(((config.value?.riskBudget || 0) * 1.8) / 4)} to meet
+          net reward/risk 1.2 when the whole risk budget can be used. Whole
+          shares, a later ask and the chart can reduce that allowance.
         </p>
         <p className="mt-2 text-xs text-slate-400">
-          When both order values are at least ₹200, the standard minimum
-          two-order brokerage + GST is ₹11.80. Smaller orders are subject to the
-          exchange brokerage ceiling, now included. Your fixed slippage,
-          rounding and extra-charge allowances add{' '}
-          {money(
-            (config.value?.slippage || 0) +
-              (config.value?.roundingReserve || 0) +
-              (config.value?.extraCharges || 0)
-          )}
-          , before other levies. With the default reserves and normal minimum
-          brokerage, the current 2R rules cannot qualify a trade within ₹50.
-          Verify costs independently; do not reduce them to create candidates.
+          Each quantity uses the largest of your execution reserve, ₹5, two
+          spreads × quantity and two ticks × quantity. Tax rounding stays at
+          least ₹1. Purchase value is capped at ₹5,000; cash and all costs must
+          fit ₹9,500. Costs stay inside the ₹50 planned-risk cap. Targets remain
+          3× the original chart stop distance; no chasing or moving the target.
+        </p>
+        <p className="mt-2 text-xs text-amber-200">
+          One 3R entry per day across the shared account. No leverage or broker
+          orders. Zero candidates is valid. Refresh other open app tabs before
+          saving; old scanner versions cannot write the new backup format.
         </p>
         <Link
           href="/cash-plan"
           className="mt-3 inline-block text-sm text-teal-300 underline"
         >
-          Review the ₹10,000 cash plan proposal — existing studies unchanged
+          Read the active 3R rules and cost examples
         </Link>
       </section>
       <section className={card}>

@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { CHARGE_SCHEDULE } from '@/lib/brokerCharges';
-import { evaluateCashPlanProposal } from '@/lib/cashPlanProposal';
+import { evaluateCash3RPlan } from '@/lib/cashPlan';
 
 const money = (n: number) => `₹${n.toFixed(2)}`;
 const example = {
@@ -35,18 +35,18 @@ const rules = [
   ],
   [
     'Capital and position value',
-    '₹10,000 equity, ₹9,500 available cash including costs. Proposed position-value ceiling ₹5,000; whole shares only, no leverage.',
+    '₹10,000 equity, ₹9,500 available cash including costs. Position-value ceiling ₹5,000; whole shares only, no leverage.',
   ],
   [
-    'Target: proposed change',
+    'Target: 3R',
     '3× the original chart stop distance instead of 2×. Keep minimum net reward/risk 1.2. Skip if known resistance obstructs the full target; do not move the stop or invent room.',
   ],
   [
-    'Execution reserve: proposed change',
+    'Execution reserve',
     'At least the largest of ₹5, two spreads × quantity, two ticks × quantity, and the observed adverse-fill allowance. Keep at least ₹1 for tax rounding plus any extra charges. These are provisional floors, not certified execution costs.',
   ],
   [
-    'Execution filter: proposed change',
+    'Execution filter',
     'Keep observed spread within 10% of chart stop distance. Change the combined spread-cost plus execution-reserve ceiling from 10% to 25% of gross stop risk. The old filter cannot accommodate the ₹5 reserve within ₹50 total risk.',
   ],
   [
@@ -55,17 +55,17 @@ const rules = [
   ],
   [
     'Research discipline',
-    'Propose one entry per day initially, one open position across journals. Keep ₹100 daily, ₹250 weekly and ₹500 monthly/drawdown limits. No daily profit quota.',
+    'One entry per day, one open position across journals. Keep ₹100 daily, ₹250 weekly and ₹500 monthly/drawdown limits. No daily profit quota.',
   ],
 ];
 
 export default function CashPlanPage() {
-  const plan = evaluateCashPlanProposal(example);
+  const plan = evaluateCash3RPlan(example);
   return (
     <div className="space-y-5 pb-12">
       <header>
         <p className="text-xs uppercase tracking-widest text-amber-300">
-          Proposal · paper research only
+          Active scanner version · paper research only
         </p>
         <h1 className="mt-2 text-3xl font-bold">₹10,000 cash plan</h1>
         <p className="mt-3 text-sm text-slate-300">
@@ -76,17 +76,17 @@ export default function CashPlanPage() {
       </header>
       <section className="rounded-2xl border border-amber-700 bg-amber-950/20 p-4">
         <h2 className="font-semibold">
-          This proposal is not active in either journal
+          3R scanner active; old studies preserved
         </h2>
         <p className="mt-2 text-sm text-slate-300">
-          The scanner and three-share study retain cash-pullback-v1. This page
-          calculates hypothetical costs only and saves no trades. A new strategy
-          needs its own version and separate results before use. Do not enter
-          these examples into either journal.
+          New Scan entries use scanner-cash-3r-v2. The three-share Practice
+          study keeps its 2R rules; old scanner records remain in the 2R v1
+          history selector with separate results. These examples do not save
+          trades. Refresh all app tabs before using the new version.
         </p>
       </section>
       <section className="rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
-        <h2 className="font-semibold">Rules to review</h2>
+        <h2 className="font-semibold">Active 3R rules</h2>
         <dl className="mt-3 space-y-4 text-sm">
           {rules.map(([label, value]) => (
             <div key={label}>
@@ -101,9 +101,9 @@ export default function CashPlanPage() {
           One arithmetic example — no stock recommendation
         </h2>
         <p className="mt-2 text-sm text-slate-300">
-          15 shares at ₹200, chart stop ₹198, proposed target ₹206. Assumed tick
-          and spread ₹0.05 each. Purchase value ₹3,000; cash including cost
-          reserves {money(plan.cashRequired)}.
+          15 shares at ₹200, chart stop ₹198, 3R target ₹206. Assumed tick and
+          spread ₹0.05 each. Purchase value ₹3,000; cash including cost reserves{' '}
+          {money(plan.cashRequired)}.
         </p>
         <p className="mt-2 text-sm text-slate-300">
           Stop-side fees {money(plan.atStop.total)}; target-side fees{' '}
@@ -133,7 +133,7 @@ export default function CashPlanPage() {
             </thead>
             <tbody>
               {cases.map(({ label, ...input }) => {
-                const result = evaluateCashPlanProposal(input);
+                const result = evaluateCash3RPlan(input);
                 return (
                   <tr key={label} className="border-t border-slate-800">
                     <th className="py-3 pr-2 font-normal">{label}</th>
@@ -154,7 +154,7 @@ export default function CashPlanPage() {
         </div>
       </section>
       <section className="rounded-2xl border border-slate-700 bg-slate-900/60 p-4 text-sm">
-        <h2 className="font-semibold">Before any new paper sample</h2>
+        <h2 className="font-semibold">Before your first 3R paper entry</h2>
         <p className="mt-2 text-slate-300">
           Verify the exact account tariff and quantities against Angel One.
           During five supervised sessions, compare feeds and record candidate
@@ -163,12 +163,12 @@ export default function CashPlanPage() {
           larger, use it and recalculate or skip.
         </p>
         <p className="mt-2 text-slate-300">
-          Start a separately versioned sample only after these gates work.
-          Review at least 100 closed entries across at least 50 entry sessions;
-          at one entry per day, 100 trades actually require at least 100 entry
-          sessions, often longer with no-trade days. Include time/manual exits,
-          all losses, net expectancy and drawdown. Do not promise a 70% win rate
-          or force entries to reach a sample count.
+          Start the new 3R paper sample only after the broker data and fee
+          checks pass. Review at least 100 closed entries across at least 50
+          entry sessions; at one entry per day, 100 trades actually require at
+          least 100 entry sessions, often longer with no-trade days. Include
+          time/manual exits, all losses, net expectancy and drawdown. Do not
+          promise a 70% win rate or force entries to reach a sample count.
         </p>
         <p className="mt-2 text-amber-200">
           ₹50 is a planned loss limit. An ordinary stop cannot guarantee the

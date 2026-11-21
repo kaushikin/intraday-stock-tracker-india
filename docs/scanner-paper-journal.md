@@ -2,6 +2,8 @@
 
 Open **Scan → Review paper entry → Scanner paper journal**. Scanner trades are exploratory cash-share paper trades. They have their own browser storage, trade history, observations, fee/comparison evidence, CSV and JSON backup. They never count toward Practice's 100-trade/50-session study. Study shares can only be entered in Practice. There are no broker orders.
 
+New entries now use **3R v2**. The [active 3R protocol](scanner-3r.md) supersedes the previous scanner cost/default and entry-count rules. Old scanner 2R history and the three-stock Practice study retain their original records and separate statistics.
+
 ## Monday workflow (IST)
 
 1. Before 09:45, sign in to this app and Angel One. Use the same browser/device that holds your journals. Confirm the existing three study shares in Practice; do not change them to chase scanner candidates. Check account tariffs, scheduled company events, available supervision time and your saved backups.
@@ -16,11 +18,11 @@ Open **Scan → Review paper entry → Scanner paper journal**. Scanner trades a
 
 ## Shared safety, separate evidence
 
-Both entry paths read the two journals under the same browser write lock. Initial combined simulated equity is ₹10,000, with at most 95% allocated as cash. Entry risk is at most ₹50 or 0.5% of equity and is reduced by remaining daily ₹100, weekly ₹250, monthly ₹500 and drawdown ₹500 limits. Only one paper position can be open across both journals, with at most two combined entries per IST day. Performance and observations are still reported separately. Practice retains its existing strategy and sizing calculation; the additional shared check may block its proposed size when the combined budget is smaller.
+Both entry paths read the two journals under the same browser write lock. Initial combined simulated equity is ₹10,000, with at most 95% allocated as cash. Entry risk is at most ₹50 or 0.5% of equity and is reduced by remaining daily ₹100, weekly ₹250, monthly ₹500 and drawdown ₹500 limits. Only one paper position can be open across both journals. A 3R entry requires no earlier entry that day and blocks later entries across journals; Practice retains its two-entry maximum on days without 3R. Performance and observations are still reported separately. Practice retains its existing strategy and sizing calculation; the additional shared check may block its proposed size when the combined budget is smaller.
 
 Limits use recorded closed P/L and do not guarantee a maximum real loss. Keep one device/browser for this pilot: Web Locks coordinate tabs on the same origin, not different devices or Vercel aliases. Do not run old tabs alongside the release; refresh them before Monday. Restore both journals when changing devices before recording new entries. An unreadable journal blocks new entries instead of assuming zero past losses.
 
-Scanner JSON has an explicit kind/version. Practice rejects scanner backups, including empty ones. Scanner restore merges matching records and rejects conflicting histories, malformed evidence and overlapping positions. It does not silently overwrite an existing closed trade with an older open backup. Raw export and explicitly confirmed recovery are available for unreadable scanner storage. There is no delete-history shortcut. Browser quota/write failures leave the previous scanner value intact. Settings' general backup does not include the scanner journal.
+Scanner JSON format 2 includes both strategy versions; format-1 backups remain readable without rewriting them. The results selector and CSV separate 3R from historical 2R; old open positions can still be closed. Scanner JSON has an explicit kind/version. Practice rejects scanner backups, including empty ones. Scanner restore merges matching records and rejects conflicting histories, malformed evidence and overlapping positions. It does not silently overwrite an existing closed trade with an older open backup. Raw export and explicitly confirmed recovery are available for unreadable scanner storage. There is no delete-history shortcut. Browser quota/write failures leave the previous scanner value intact. Settings' general backup does not include the scanner journal.
 
 ## Readiness review: fixed now and still pending
 
@@ -35,7 +37,7 @@ Scanner JSON has an explicit kind/version. Practice rejects scanner backups, inc
 | Storage is local | Use one browser/device, avoid private sessions and export both backups. GitHub/Vercel deployment does not synchronize journal records. |
 | Market data quality | Off-hours coverage is not a live validation. Complete Monday's independent timestamp/OHLCV/bid-ask checks before entries. |
 | Events/corporate actions | Check the selected company's announcements/results and suspicious chart gaps manually; no authoritative automated event calendar is integrated. |
-| Costs consume most of ₹50 | Zero qualifying entries may be the correct result. Keep the strategy and cost assumptions honest. |
+| Costs consume most of ₹50 | The active 3R scanner uses at least ₹5 execution and ₹1 rounding reserves, ₹5,000 maximum purchase value and net RR at least 1.2. Skip when full costs do not fit. |
 | Calendar | Regular 2026 sessions only. Unknown years fail closed; verify/update 2027 before use then. |
 | Statistical selection and supervision | Preserve failed/skipped attempts and prioritize the fixed study. Log missed study opportunities if scanner work prevents supervision. Review operations after five sessions; do not pool scanner winners into the study. |
 

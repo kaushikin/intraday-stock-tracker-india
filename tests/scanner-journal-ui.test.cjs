@@ -89,6 +89,25 @@ const props = () => ({
   recheck: () => {},
 });
 
+test('history selector keeps old 2R results separate without migrating stored records', async (t) => {
+  const old = require('./fixtures/scanner-v1-closed.json');
+  const raw = JSON.stringify(old);
+  localStorage.setItem(j.SCANNER_BOOK_KEY, raw);
+  current = f.now.getTime() + 120000;
+  const { el } = await mount(
+    t,
+    React.createElement(Component, { ...props(), context: null, selected: '' })
+  );
+  assert.match(el.textContent, /3R v2 only: 0 closed/);
+  await field(el, 'Scanner results version', 'cash-pullback-v1');
+  assert.match(el.textContent, /2R v1 history only: 1 closed/);
+  assert.match(el.textContent, /target ₹216.65/);
+  await field(el, 'Scanner results version', 'scanner-cash-3r-v2');
+  assert.match(el.textContent, /3R v2 only: 0 closed/);
+  assert.equal(localStorage.getItem(j.SCANNER_BOOK_KEY), raw);
+  assert.equal(localStorage.getItem(b.PAPER_BOOK_KEY), null);
+});
+
 test('scanner UI records independent comparison, exact fees, entry and exit without changing study bytes', async (t) => {
   localStorage.setItem(b.PAPER_BOOK_KEY, JSON.stringify(b.emptyPaperBook()));
   localStorage.setItem('watchlist', JSON.stringify(f.fixed));
@@ -162,7 +181,7 @@ test('scanner UI records independent comparison, exact fees, entry and exit with
   current += 60000;
   await act(async () => root.render(React.createElement(Component, props())));
   await field(el, 'Observed scanner exit price (₹)', '202.2');
-  await field(el, 'Total estimated round-trip exit charges (₹)', '13');
+  await field(el, 'Total estimated round-trip exit charges (₹)', '15');
   await field(el, 'Observed exit timestamp (IST)', '2026-11-20T09:46:05');
   await field(
     el,
@@ -308,7 +327,9 @@ test('Settings rejects scanner files and overlapping study restores before chang
   }
   await upload(v.book);
   assert.match(el.textContent, /cannot be imported into Practice/);
-  const position = { ...v.book.positions[0] };
+  const position = structuredClone(
+    require('./fixtures/scanner-v1-open.json').positions[0]
+  );
   delete position.origin;
   delete position.proof;
   await upload({

@@ -4,7 +4,7 @@ A private Next.js 14 application for Indian cash-equity research and journaling.
 
 Repository: https://github.com/kaushikin/intraday-stock-tracker-india
 
-The [₹10,000 cash plan proposal](docs/cash-plan-v2-proposal.md), also available at `/cash-plan`, explains a separately versioned 3R research approach with larger cost reserves and the same ₹50 risk cap. It is read-only and is not active in either journal. The fee-ceiling correction is active; historical evidence retains its original calculation version.
+The [active scanner 3R protocol](docs/scanner-3r.md), also explained at `/cash-plan`, uses a separate `scanner-cash-3r-v2` strategy with larger cost reserves and the same ₹50 planned-risk cap. Practice remains 2R. Old scanner trades remain in the 2R history selector with separate statistics and CSVs; combined JSON backups preserve both versions. Refresh all app tabs before using this release.
 
 ## Practice workflow
 
@@ -22,7 +22,7 @@ The study uses `cash-pullback-v1`, documented in [docs/paper-research.md](docs/p
 
 Practice automatically checks the fixed study shares while the tab is visible during regular market hours (quote requests about every 10 seconds, candle requests about every 30 seconds, subject to provider delays). It does not select a different universe each day, record fills automatically or monitor a closed app. NIFTY is confirmation, not a cash share to enter. A saved study universe takes precedence over subsequent Watchlist edits.
 
-The **Scan** tab (`/market`) is a separate Nifty 50 exploratory screen. It reads the official current constituents, fetches candle history in small sequential batches, then refreshes quotes and sizes candidates with quantity-specific charges. It uses the same setup function as Practice and provides its own explicit paper journal without writing to the three-share study or Watchlist. Both entry paths enforce combined cash/loss limits while keeping performance samples separate. See [scanner operation and limits](docs/nifty50-scanner.md).
+The **Scan** tab (`/market`) is a separate Nifty 50 exploratory screen. It reads the official current constituents, fetches candle history in small sequential batches, then refreshes quotes and sizes candidates with quantity-specific charges. It shares the closed-candle pullback conditions with Practice but locks a separate 3R target and enforces its own cost rules. Its paper journal never writes to the three-share study or Watchlist. Both entry paths enforce combined cash/loss limits while keeping performance samples separate. See [scanner operation and limits](docs/nifty50-scanner.md).
 
 See the [scanner paper journal and Monday readiness review](docs/scanner-paper-journal.md) for entry/exit, independent OHLCV comparisons, fee checks, session notes and separate backup/restore. Journal records remain on the current browser/device; deployments do not synchronize them.
 
@@ -31,10 +31,10 @@ See the [scanner paper journal and Monday readiness review](docs/scanner-paper-j
 - Initial practice equity: ₹10,000; keep 5% cash unallocated.
 - Total planned risk per entry: the lesser of ₹50, 0.5% of current equity, and remaining loss-limit headroom. Costs and slippage are included.
 - Loss limits: ₹100/day, ₹250/week, ₹500/month and ₹500 from the closed-equity high-water mark.
-- One open position and maximum two entries per IST day across both paper journals, no fixed daily profit target. Shared guards use their combined closed P/L for loss headroom; strategy performance stays separate.
-- Target: 2× initial price risk. Minimum estimated net reward/risk: 1.2.
+- One open position across both journals. Scanner 3R requires no prior entry in either journal that day and consumes the day’s entry allowance. Practice keeps its two-entry maximum on days without 3R. Shared guards use all versions’ closed P/L for loss headroom; performance samples stay separate.
+- Practice target: 2× original price risk. Active scanner target: 3× original price risk, with ₹5,000 purchase-value cap, at least ₹5 execution reserve and ₹1 rounding reserve. Minimum net reward/risk stays 1.2 in both.
 
-At ₹50 total risk, a 2R target can meet net R:R 1.2 only if total estimated charges and slippage are at most ₹13.33; whole-share rounding and available cash can make the limit stricter. The default ₹15 + ₹1 is an unverified placeholder and intentionally cannot qualify an entry. Enter real broker estimates; never lower costs or enlarge risk to force a trade. Actual gap losses can exceed planned risk.
+For the unchanged Practice study, at ₹50 total risk, a 2R target can meet net R:R 1.2 only if total estimated charges and slippage are at most ₹13.33; whole-share rounding and available cash can make the limit stricter. The default ₹15 + ₹1 is an unverified placeholder and intentionally cannot qualify an entry. Enter real broker estimates; never lower costs or enlarge risk to force a trade. Actual gap losses can exceed planned risk.
 
 ## Readiness and charge checks
 

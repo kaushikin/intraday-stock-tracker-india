@@ -1,8 +1,9 @@
-import { cashCostScenario } from './brokerCharges';
+import { cashCostScenario, CHARGE_SCHEDULE } from './brokerCharges';
+import { SCANNER_3R_VERSION } from './paperStrategy';
 
-// Read-only feasibility proposal. Neither scanner nor journal uses these rules.
-export const CASH_PLAN_PROPOSAL = Object.freeze({
-  version: 'cash-pullback-v2-proposal',
+// Active scanner 3R cost rules. Practice and historical scanner sizing stay separate.
+export const CASH_3R_RULES = Object.freeze({
+  version: SCANNER_3R_VERSION,
   maxRisk: 50,
   cash: 9500,
   maxPositionValue: 5000,
@@ -13,8 +14,10 @@ export const CASH_PLAN_PROPOSAL = Object.freeze({
   maxExecutionFraction: 0.25,
 });
 
-export function evaluateCashPlanProposal(input: {
+export function evaluateCash3RPlan(input: {
   entry: number;
+  trigger?: number;
+  chargeSchedule?: string;
   stop: number;
   quantity: number;
   spread: number;
@@ -25,9 +28,11 @@ export function evaluateCashPlanProposal(input: {
   riskBudget?: number;
   cash?: number;
 }) {
-  const r = CASH_PLAN_PROPOSAL;
+  const r = CASH_3R_RULES;
   const {
     entry,
+    trigger = entry,
+    chargeSchedule = CHARGE_SCHEDULE.id,
     stop,
     quantity,
     spread,
@@ -41,6 +46,7 @@ export function evaluateCashPlanProposal(input: {
   if (
     ![
       entry,
+      trigger,
       stop,
       spread,
       tickSize,
@@ -50,7 +56,13 @@ export function evaluateCashPlanProposal(input: {
       riskBudget,
       cash,
     ].every(Number.isFinite) ||
-    !(entry > stop && stop > 0 && tickSize > 0 && spread >= 0) ||
+    !(
+      entry >= trigger &&
+      trigger > stop &&
+      stop > 0 &&
+      tickSize > 0 &&
+      spread >= 0
+    ) ||
     !Number.isSafeInteger(quantity) ||
     quantity <= 0 ||
     quantity > 100000 ||
@@ -65,10 +77,10 @@ export function evaluateCashPlanProposal(input: {
     throw new Error(
       'Use positive cash-share levels, whole shares, non-negative costs, risk up to ₹50 and cash up to ₹9,500.'
     );
-  const distance = entry - stop;
+  const distance = trigger - stop;
   const target =
     Math.round(
-      Math.ceil((entry + r.grossTargetR * distance) / tickSize - 1e-8) *
+      Math.ceil((trigger + r.grossTargetR * distance) / tickSize - 1e-8) *
         tickSize *
         10000
     ) / 10000;
@@ -88,10 +100,11 @@ export function evaluateCashPlanProposal(input: {
     roundingReserve: taxReserve + extraCharges,
     riskBudget,
     cash,
+    chargeSchedule,
   });
   const reasons = [...scenario.reasons];
   if (quantity * entry > r.maxPositionValue + 1e-8)
-    reasons.push('Position value exceeds the proposed ₹5,000 ceiling.');
+    reasons.push('Position value exceeds the ₹5,000 ceiling.');
   if (spread > distance * r.maxSpreadFraction + 1e-8)
     reasons.push('Observed spread exceeds 10% of the chart stop distance.');
   if (

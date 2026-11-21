@@ -16,6 +16,7 @@ import {
   saveScannerFees,
   scannerCSV,
   scannerStats,
+  scannerVersionBook,
   SCANNER_BOOK_KEY,
   sharedAccount,
   type ScannerBook,
@@ -25,6 +26,11 @@ import {
 import { isClosed, positionPL, type ExitReason } from '@/lib/paperBook';
 import type { ComparisonSnapshot } from '@/lib/researchEvidence';
 import { estimateCashCharges } from '@/lib/brokerCharges';
+import {
+  STRATEGY_VERSION,
+  SCANNER_3R_VERSION,
+  type CashStrategyVersion,
+} from '@/lib/paperStrategy';
 import { fetchScannerQuote } from '@/lib/scannerFeed';
 import { isIndianMarketOpen, istDateKey } from '@/lib/marketHours';
 import { displayTime } from './DataStatusPanel';
@@ -176,6 +182,8 @@ export default function ScannerJournal({
     [observation, setObservation] = useState('');
   const [incoming, setIncoming] = useState<ScannerBook | null>(null),
     [replaceUnreadable, setReplaceUnreadable] = useState(false);
+  const [historyVersion, setHistoryVersion] =
+    useState<CashStrategyVersion>(SCANNER_3R_VERSION);
   const lock = useRef(false);
   useEffect(() => {
     setSnapshot(null);
@@ -200,7 +208,8 @@ export default function ScannerJournal({
       setReviewed(false);
     }
   }, [feeKey]);
-  const stats = scannerStats(book),
+  const versionBook = scannerVersionBook(book, historyVersion);
+  const stats = scannerStats(book, historyVersion),
     account = sharedAccount(book, study, clock);
   const comparison = now
     ? latestScannerComparison(book, selected, now)
@@ -299,8 +308,9 @@ export default function ScannerJournal({
       <div className={card}>
         <h2 className="text-xl font-semibold">Scanner paper journal</h2>
         <p className="mt-2 text-sm">
-          Exploratory cash-share paper trades only. Separate records, backups
-          and statistics; never added to the three-share study.
+          Active version: scanner-cash-3r-v2. New 3R entries and old 2R history
+          have separate statistics and CSVs. Neither enters the three-share
+          study.
         </p>
         <p className="mt-2 text-xs text-amber-200">
           Saved on this browser/device only, not on GitHub or Vercel. Use one
@@ -316,14 +326,16 @@ export default function ScannerJournal({
           for their entries.
         </p>
         <p className="mt-2 text-xs">
-          Both journals share entry safety limits: one open position, two
-          entries/day, ₹100/day, ₹250/week, ₹500/month and ₹500 drawdown. Their
-          performance samples stay separate.
+          Both journals share entry safety limits: one open position, ₹100/day,
+          ₹250/week, ₹500/month and ₹500 drawdown. A 3R entry is allowed only if
+          neither journal has an entry today, and consumes today’s entry
+          allowance. Practice keeps its own two-entry limit on days without 3R.
         </p>
         {ready && studyReady && now && (
           <p className="mt-2 text-sm">
             Combined equity {money(account.equity)} · remaining risk per entry{' '}
-            {money(account.riskBudget)} · entries today {account.tradesToday}/2
+            {money(account.riskBudget)} · combined entries today{' '}
+            {account.tradesToday}
           </p>
         )}
         {(!ready || !studyReady) && (
@@ -343,10 +355,27 @@ export default function ScannerJournal({
             {message}
           </p>
         )}
+        <label className="mt-3 block text-xs">
+          Scanner results version
+          <select
+            className={input}
+            value={historyVersion}
+            onChange={(e) =>
+              setHistoryVersion(e.target.value as CashStrategyVersion)
+            }
+          >
+            <option value={SCANNER_3R_VERSION}>
+              3R v2 — active paper sample
+            </option>
+            <option value={STRATEGY_VERSION}>2R v1 — preserved history</option>
+          </select>
+        </label>
         <p className="mt-3 text-sm">
-          Scanner only: {stats.count} closed · {stats.wins} wins ·{' '}
-          {stats.losses} losses · {stats.breakeven} breakeven · net{' '}
-          {money(stats.net)} ·{' '}
+          {historyVersion === SCANNER_3R_VERSION
+            ? '3R v2 only'
+            : '2R v1 history only'}
+          : {stats.count} closed · {stats.wins} wins · {stats.losses} losses ·{' '}
+          {stats.breakeven} breakeven · net {money(stats.net)} ·{' '}
           {stats.winRate === null
             ? 'win rate not available'
             : `${stats.winRate.toFixed(1)}% net winners`}
@@ -434,6 +463,10 @@ export default function ScannerJournal({
             ? `Review scanner paper entry · ${selected}`
             : 'Review a scanner candidate'}
         </h3>
+        <p className="mt-2 text-xs">
+          This entry form always uses 3R v2. The results selector only changes
+          the history being viewed.
+        </p>
         {!selected && (
           <p className="mt-2 text-sm">
             Run a scan, then choose Review paper entry on a result. You can
@@ -463,7 +496,10 @@ export default function ScannerJournal({
                 {money(preview.result.plan.risk)} · net R:R{' '}
                 {preview.result.plan.netRR.toFixed(3)} · planning fees{' '}
                 {money(preview.result.plan.planningCharges)} plus slippage{' '}
-                {money(preview.config.slippage)}
+                {money(
+                  preview.result.plan.executionReserve ??
+                    preview.config.slippage
+                )}
               </p>
             )}
             <div className="mt-4 border-t border-slate-700 pt-3">
@@ -664,6 +700,10 @@ export default function ScannerJournal({
         <h3 className="font-semibold">
           Scanner observations and session notes
         </h3>
+        <p className="mt-2 text-xs">
+          New notes belong to 3R v2. The results selector controls which saved
+          notes are shown.
+        </p>
         <label className="mt-2 block text-xs">
           Skip reason, data gap, mistake or session review
           <textarea
@@ -704,8 +744,11 @@ export default function ScannerJournal({
           </button>
         </div>
         <details className="mt-3">
-          <summary>Saved observations · {book.observations.length}</summary>
-          {book.observations
+          <summary>
+            Saved observations for selected version ·{' '}
+            {versionBook.observations.length}
+          </summary>
+          {versionBook.observations
             .slice()
             .reverse()
             .map((o) => (
@@ -717,12 +760,14 @@ export default function ScannerJournal({
       </div>
       <div className={card}>
         <h3 className="font-semibold">
-          Scanner trade history · {book.positions.length}
+          Scanner trade history ·{' '}
+          {historyVersion === SCANNER_3R_VERSION ? '3R v2' : '2R v1'} ·{' '}
+          {versionBook.positions.length}
         </h3>
-        {!book.positions.length && (
+        {!versionBook.positions.length && (
           <p className="mt-2 text-sm">No scanner paper entries recorded.</p>
         )}
-        {book.positions
+        {versionBook.positions
           .slice()
           .reverse()
           .map((p) => (
@@ -734,9 +779,9 @@ export default function ScannerJournal({
                   : 'OPEN'}
               </summary>
               <p className="mt-2 text-xs">
-                {p.quantity} shares · entry {money(p.entry)} · stop{' '}
-                {money(p.setup.stop)} · target {money(p.setup.target)} · planned
-                risk {money(p.plannedRisk)}
+                {p.setup.version} · {p.quantity} shares · entry {money(p.entry)}{' '}
+                · stop {money(p.setup.stop)} · target {money(p.setup.target)} ·
+                planned risk {money(p.plannedRisk)}
               </p>
               {p.exitedAt && (
                 <p className="mt-2 text-xs">
@@ -755,6 +800,11 @@ export default function ScannerJournal({
       </div>
       <div className={card}>
         <h3 className="font-semibold">Separate scanner backup and restore</h3>
+        <p className="mt-2 text-xs">
+          JSON backup includes both scanner versions and preserves old records.
+          CSV exports only the selected results version. Keep the Practice
+          backup separate.
+        </p>
         <div className="mt-3 flex flex-wrap gap-2">
           <button
             className={button}
@@ -773,8 +823,8 @@ export default function ScannerJournal({
             disabled={!ready}
             onClick={() =>
               downloadScannerFile(
-                `scanner-trades-${istDateKey()}.csv`,
-                scannerCSV(book),
+                `scanner-trades-${historyVersion}-${istDateKey()}.csv`,
+                scannerCSV(book, historyVersion),
                 'text/csv'
               )
             }
@@ -953,8 +1003,8 @@ function ScannerOpenPosition({
         Open scanner paper position · {p.setup.symbol}
       </h3>
       <p className="mt-2 text-sm">
-        {p.quantity} shares at {money(p.entry)} · stop {money(p.setup.stop)} ·
-        target {money(p.setup.target)}
+        {p.setup.version} · {p.quantity} shares at {money(p.entry)} · stop{' '}
+        {money(p.setup.stop)} · target {money(p.setup.target)}
       </p>
       <p className="mt-2 text-xs">
         Entered {displayTime(p.enteredAt)} · time exit due{' '}
@@ -1033,8 +1083,9 @@ function ScannerOpenPosition({
       {estimate !== undefined && (
         <p className="mt-2 text-xs">
           Published round-trip fee estimate at this exit: {money(estimate)}.
-          Include applicable extra charges/rounding once. Do not subtract the
-          original slippage reserve again from observed fill prices.
+          Include applicable extra charges/rounding once; 3R exits enforce the
+          saved rounding and extra-charge reserves. Do not subtract the original
+          slippage reserve again from observed fill prices.
         </p>
       )}
       <label className="mt-2 block text-xs">

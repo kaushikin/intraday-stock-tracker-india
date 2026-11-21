@@ -108,13 +108,11 @@ test('scanner explains costs, scans all official members and leaves the saved st
     return sample();
   };
   assert.match(el.textContent, /Your three-share study stays separate/);
-  assert.match(el.textContent, /₹13.33/);
-  await change(el, 'Slippage reserve (₹)', '0.25');
-  await change(el, 'Tax-rounding reserve (₹)', '0');
+  assert.match(el.textContent, /₹22.50/);
   await act(async () => button(el, 'Scan Nifty 50').click());
   assert.equal(requested.length, 50);
   assert.match(el.textContent, /SBIN · fits estimated budget/);
-  assert.match(el.textContent, /Quantity 5/);
+  assert.match(el.textContent, /Quantity 4/);
   assert.match(el.textContent, /not a trade approval/);
   assert.equal(localStorage.getItem('paper_trading_book_v1'), before.book);
   assert.equal(localStorage.getItem('watchlist'), before.watch);
@@ -135,14 +133,23 @@ test('scanner removes shortlist eligibility as quotes age and preserves a no-can
   };
   t.after(() => (window.setInterval = oldInterval));
   const el = await mount(t);
-  await change(el, 'Slippage reserve (₹)', '0.25');
-  await change(el, 'Tax-rounding reserve (₹)', '0');
   await act(async () => button(el, 'Scan Nifty 50').click());
   assert.match(el.textContent, /Shortlist · 1/);
   currentTime += 31000;
   await act(async () => tick());
   assert.match(el.textContent, /Shortlist · 0/);
   assert.match(el.textContent, /Quote is stale/);
+});
+test('active scanner UI cannot lower execution or rounding costs to manufacture a shortlist', async (t) => {
+  const el = await mount(t);
+  await change(el, 'Execution reserve floor (₹, min 5)', '4.99');
+  assert.equal(button(el, 'Scan Nifty 50').disabled, true);
+  assert.match(el.textContent, /at least ₹5 execution reserve/);
+  await change(el, 'Execution reserve floor (₹, min 5)', '5');
+  await change(el, 'Tax-rounding reserve (₹, min 1)', '0.99');
+  assert.equal(button(el, 'Scan Nifty 50').disabled, true);
+  await change(el, 'Tax-rounding reserve (₹, min 1)', '1');
+  assert.equal(button(el, 'Scan Nifty 50').disabled, false);
 });
 test('scanner cancels a hidden-tab run and blocks duplicate starts', async (t) => {
   const el = await mount(t);

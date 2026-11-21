@@ -21,7 +21,7 @@ test('scanner entry captures evidence, accepts new constituents and never change
         f.now
       );
     assert.equal(next.positions[0].origin, j.SCANNER_BOOK_KIND);
-    assert.equal(next.positions[0].quantity, 5);
+    assert.equal(next.positions[0].quantity, 4);
     assert.deepEqual(j.parseScannerBook(JSON.stringify(next), f.now), next);
   }
   assert.equal(JSON.stringify(study), before);
@@ -158,7 +158,7 @@ test('shared guards prevent simultaneous positions and count combined loss/trade
         ...p,
         id: 'study-fixture',
         exitedAt: f.now.toISOString(),
-        exit: p.entry - 18,
+        exit: p.entry - 30,
         charges: 13,
         exitReason: 'MANUAL',
       },
@@ -187,14 +187,17 @@ test('explicit exits validate time/reason/charges, count costs once, and cannot 
   const v = f.entered(),
     p = v.book.positions[0],
     later = new Date(f.now.getTime() + 60000),
-    cost = fees.estimateCashCharges(p.entry, p.setup.target, p.quantity).total;
+    cost =
+      fees.estimateCashCharges(p.entry, p.setup.target, p.quantity).total +
+      p.proof.config.roundingReserve +
+      p.proof.config.extraCharges;
   assert.throws(
     () =>
       j.closeScannerPosition(
         v.book,
         p.id,
         p.entry,
-        13,
+        15,
         'TIME',
         later.toISOString(),
         'observed',
@@ -208,7 +211,7 @@ test('explicit exits validate time/reason/charges, count costs once, and cannot 
         v.book,
         p.id,
         p.entry,
-        13,
+        15,
         'TARGET',
         later.toISOString(),
         'observed',

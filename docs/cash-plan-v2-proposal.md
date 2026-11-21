@@ -1,6 +1,6 @@
 # ₹10,000 cash plan: version 2 proposal
 
-Prepared 22 November 2026. Status: cost-feasibility proposal, not an activated or validated strategy. The read-only `/cash-plan` page shows the same calculations. Scanner and Practice still use `cash-pullback-v1`; this document does not change their targets, exits, reserves or historical records.
+Historical proposal, accepted and implemented as `scanner-cash-3r-v2`. See the [active 3R protocol](scanner-3r.md) and `/cash-plan` for current behavior. The text below preserves the planning rationale; implementation now provides version separation and the new scanner entry rules.
 
 ## Decision
 

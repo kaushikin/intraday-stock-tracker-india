@@ -65,7 +65,7 @@ test('historical charge comparisons replay their saved estimator without rewriti
 });
 
 test('old scanner backups retain their uncapped planning proof while new fee checks use the corrected version', () => {
-  const { book } = f.entered();
+  const book = structuredClone(require('./fixtures/scanner-v1-open.json'));
   const p = book.positions[0];
   p.setup = { ...p.setup, entry: 150, stop: 115, target: 220 };
   p.proof.quote = { ...p.proof.quote, price: 150, ask: 150, bid: 149.99 };

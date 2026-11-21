@@ -10,9 +10,13 @@ import { addIndicators } from './technicalIndicators';
 import { isFreshSignalWindowOpenIST, istDateKey } from './marketHours';
 
 export const STRATEGY_VERSION = 'cash-pullback-v1';
+export const SCANNER_3R_VERSION = 'scanner-cash-3r-v2';
+export type CashStrategyVersion =
+  | typeof STRATEGY_VERSION
+  | typeof SCANNER_3R_VERSION;
 export type PaperSetup = {
   id: string;
-  version: typeof STRATEGY_VERSION;
+  version: CashStrategyVersion;
   symbol: string;
   side: 'BUY';
   barTime: string;
@@ -43,6 +47,36 @@ export function findPaperSetup(
   indexRaw: CandleData[],
   quote: PriceData | undefined,
   now = new Date()
+): SetupDecision {
+  return findCashSetup(symbol, raw, indexRaw, quote, now, STRATEGY_VERSION, 2);
+}
+
+export function findScanner3RSetup(
+  symbol: string,
+  raw: CandleData[],
+  indexRaw: CandleData[],
+  quote: PriceData | undefined,
+  now = new Date()
+): SetupDecision {
+  return findCashSetup(
+    symbol,
+    raw,
+    indexRaw,
+    quote,
+    now,
+    SCANNER_3R_VERSION,
+    3
+  );
+}
+
+function findCashSetup(
+  symbol: string,
+  raw: CandleData[],
+  indexRaw: CandleData[],
+  quote: PriceData | undefined,
+  now: Date,
+  version: CashStrategyVersion,
+  targetR: 2 | 3
 ): SetupDecision {
   const blocked = (reason: string, dataReady = false): SetupDecision => ({
     reasons: [reason],
@@ -120,7 +154,7 @@ export function findPaperSetup(
       );
     const entry = round((Math.floor(c.high / tick + 1e-7) + 1) * tick);
     const stop = round((Math.ceil(c.low / tick - 1e-7) - 1) * tick);
-    const target = round(entry + 2 * (entry - stop));
+    const target = round(entry + targetR * (entry - stop));
     const session = istDateKey(now),
       previousDay = history
         .map((bar) => istDateKey(new Date(bar.time)))
@@ -143,7 +177,7 @@ export function findPaperSetup(
       );
     if (levels.some((level) => level > entry && level < target))
       return blocked(
-        'A session high obstructs the proposed 2× price-risk target.',
+        `A session high obstructs the proposed ${targetR}× price-risk target.`,
         true
       );
     if (
@@ -157,8 +191,8 @@ export function findPaperSetup(
       dataReady: true,
       reasons: [],
       setup: {
-        id: `${STRATEGY_VERSION}:${symbol}:${c.time}`,
-        version: STRATEGY_VERSION,
+        id: `${version}:${symbol}:${c.time}`,
+        version,
         symbol,
         side: 'BUY',
         barTime: c.time,

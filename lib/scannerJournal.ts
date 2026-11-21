@@ -22,15 +22,22 @@ import {
   type MarketComparison,
 } from './researchEvidence';
 import {
-  screenCandidate,
   sizeScannerSetup,
-  validateScanConfig,
   type ScanConfig,
   type ScanPlan,
 } from './niftyScanner';
 import type { ScannerData } from './scannerFeed';
 import { NIFTY50_SOURCE, type NiftyUniverse } from './nifty50';
-import { STRATEGY_VERSION } from './paperStrategy';
+import {
+  STRATEGY_VERSION,
+  SCANNER_3R_VERSION,
+  type CashStrategyVersion,
+} from './paperStrategy';
+import {
+  screenScanner3R,
+  sizeScanner3RSetup,
+  validateScanConfig3R,
+} from './scanner3R';
 import {
   estimateCashCharges,
   CHARGE_SCHEDULE,
@@ -66,15 +73,21 @@ export type ScannerPosition = PaperPosition & {
   exitNotes?: string;
 };
 export type ScannerBook = {
-  version: 1;
+  version: 1 | 2;
   kind: typeof SCANNER_BOOK_KIND;
   positions: ScannerPosition[];
   comparisons: MarketComparison[];
   feeChecks: ScannerFeeCheck[];
-  observations: { id: string; at: string; symbol: string; reason: string }[];
+  observations: {
+    id: string;
+    at: string;
+    symbol: string;
+    reason: string;
+    strategyVersion?: CashStrategyVersion;
+  }[];
 };
 export const emptyScannerBook = (): ScannerBook => ({
-  version: 1,
+  version: 2,
   kind: SCANNER_BOOK_KIND,
   positions: [],
   comparisons: [],
@@ -86,8 +99,20 @@ const asPaperBook = (positions: PaperPosition[]): PaperBook => ({
   positions,
   observations: [],
 });
-export const scannerStats = (book: ScannerBook) =>
-  paperStats(asPaperBook(book.positions));
+export const scannerVersionBook = (
+  book: ScannerBook,
+  version: CashStrategyVersion
+): ScannerBook => ({
+  ...book,
+  positions: book.positions.filter((p) => p.setup.version === version),
+  observations: book.observations.filter(
+    (o) => (o.strategyVersion ?? STRATEGY_VERSION) === version
+  ),
+});
+export const scannerStats = (
+  book: ScannerBook,
+  version: CashStrategyVersion = SCANNER_3R_VERSION
+) => paperStats(asPaperBook(scannerVersionBook(book, version).positions));
 export const sharedAccount = (
   scanner: ScannerBook,
   study: PaperBook,
@@ -102,6 +127,11 @@ export function sharedEntryReasons(
 ) {
   const account = sharedAccount(scanner, study, now);
   return [
+    ...(scanner.positions.some(
+      (p) => p.setup.version === SCANNER_3R_VERSION && sameDay(p.enteredAt, now)
+    )
+      ? ['Scanner 3R used today’s single-entry allowance across journals.']
+      : []),
     ...account.reasons.map((r) => `Across both journals: ${r}`),
     ...(!Number.isFinite(risk) || risk > account.riskBudget + 1e-8
       ? ['Planned risk exceeds the remaining combined paper budget.']
@@ -192,6 +222,7 @@ export function saveScannerComparison(
   const issues = validComparison(snapshot, broker, now);
   return {
     ...book,
+    version: 2,
     comparisons: [
       ...book.comparisons,
       {
@@ -237,6 +268,7 @@ export function scannerFeeKey(
     config.slippage,
     config.roundingReserve,
     config.extraCharges,
+    ...(plan.executionReserve === undefined ? [] : [plan.executionReserve]),
     ...(chargeSchedule === LEGACY_CHARGE_SCHEDULE_ID ? [] : [chargeSchedule]),
   ]);
 }
@@ -258,6 +290,7 @@ export function saveScannerFees(
     );
   return {
     ...book,
+    version: 2,
     feeChecks: [
       ...book.feeChecks,
       { ...check, id: crypto.randomUUID(), at: now.toISOString() },
@@ -278,7 +311,7 @@ export function previewScannerEntry(
   now = new Date()
 ) {
   const { universe, data, symbol } = context;
-  validateScanConfig(context.config);
+  validateScanConfig3R(context.config);
   const account = sharedAccount(book, study, now);
   const config = {
     ...context.config,
@@ -286,6 +319,10 @@ export function previewScannerEntry(
     cash: Math.min(context.config.cash, account.availableCapital),
   };
   const reasons = [...account.reasons.map((r) => `Across both journals: ${r}`)];
+  if (account.tradesToday >= 1)
+    reasons.push(
+      'Scanner 3R allows one entry per day across journals. A paper entry is already recorded today.'
+    );
   if (fixedSymbols.includes(symbol))
     reasons.push(
       'This is a study share. Record it only in Practice after its own checks.'
@@ -304,7 +341,7 @@ export function previewScannerEntry(
     reasons.push('Current official Nifty 50 membership is not verified.');
   const result =
     config.riskBudget > 0 && config.cash > 0
-      ? screenCandidate(
+      ? screenScanner3R(
           symbol,
           data.quotes[symbol],
           data.candles[symbol] || [],
@@ -387,7 +424,7 @@ export function openScannerPosition(
     enteredAt: now.toISOString(),
     plannedRisk: plan!.risk,
     estimatedCharges: plan!.planningCharges,
-    slippageAllowance: check.config.slippage,
+    slippageAllowance: plan!.executionReserve!,
     notes: notes.trim(),
     proof: {
       chargeSchedule: CHARGE_SCHEDULE.id,
@@ -403,7 +440,7 @@ export function openScannerPosition(
       },
     },
   };
-  return { ...book, positions: [...book.positions, position] };
+  return { ...book, version: 2, positions: [...book.positions, position] };
 }
 export function closeScannerPosition(
   book: ScannerBook,
@@ -419,9 +456,14 @@ export function closeScannerPosition(
     throw new Error('Record the observed exit source and any data gaps.');
   const p = book.positions.find((p) => p.id === id);
   if (!p) throw new Error('Scanner position not found.');
-  if (charges + 1e-8 < estimateCashCharges(p.entry, exit, p.quantity).total)
+  const costFloor =
+    estimateCashCharges(p.entry, exit, p.quantity).total +
+    (p.setup.version === SCANNER_3R_VERSION
+      ? p.proof.config.roundingReserve + p.proof.config.extraCharges
+      : 0);
+  if (charges + 1e-8 < costFloor)
     throw new Error(
-      'Exit fees are below the published estimate. Include the round-trip charges.'
+      'Exit fees are below the published estimate and required rounding/extra charges. Include the full round-trip costs.'
     );
   const closed = closePaperPosition(
     asPaperBook(book.positions),
@@ -434,6 +476,7 @@ export function closeScannerPosition(
   );
   return {
     ...book,
+    version: 2,
     positions: closed.positions.map((p) =>
       p.id === id ? { ...p, exitNotes: notes.trim() } : p
     ) as ScannerPosition[],
@@ -451,6 +494,7 @@ export function addScannerObservation(
     );
   return {
     ...book,
+    version: 2,
     observations: [
       ...book.observations,
       {
@@ -458,6 +502,7 @@ export function addScannerObservation(
         at: now.toISOString(),
         symbol,
         reason: reason.trim(),
+        strategyVersion: SCANNER_3R_VERSION,
       },
     ],
   };
@@ -476,7 +521,7 @@ export function parseScannerBook(
     );
   };
   if (
-    b?.version !== 1 ||
+    ![1, 2].includes(b?.version) ||
     b.kind !== SCANNER_BOOK_KIND ||
     ![b.positions, b.comparisons, b.feeChecks, b.observations].every(
       (a) => Array.isArray(a) && a.length <= 10000
@@ -512,6 +557,9 @@ export function parseScannerBook(
     if (
       !past(o.at, now) ||
       (!symbolOK(o.symbol) && o.symbol !== 'SESSION') ||
+      (o.strategyVersion !== undefined &&
+        ![STRATEGY_VERSION, SCANNER_3R_VERSION].includes(o.strategyVersion)) ||
+      (o.strategyVersion === SCANNER_3R_VERSION && b.version !== 2) ||
       !textOK(o.reason)
     )
       invalid();
@@ -525,7 +573,9 @@ export function parseScannerBook(
       p.mode !== 'PAPER' ||
       p.id !== p.setup.id ||
       !symbolOK(p.setup.symbol) ||
-      p.setup.version !== STRATEGY_VERSION ||
+      ![STRATEGY_VERSION, SCANNER_3R_VERSION].includes(p.setup.version) ||
+      (p.setup.version === SCANNER_3R_VERSION &&
+        (b.version !== 2 || p.proof.chargeSchedule !== CHARGE_SCHEDULE.id)) ||
       p.setup.side !== 'BUY' ||
       !past(p.enteredAt, now) ||
       !textOK(p.notes) ||
@@ -543,7 +593,11 @@ export function parseScannerBook(
       ![NIFTY50_SOURCE, NIFTY50_ALTERNATE_SOURCE].includes(u.source)
     )
       invalid();
-    const sized = sizeScannerSetup(
+    const sized = (
+      p.setup.version === SCANNER_3R_VERSION
+        ? sizeScanner3RSetup
+        : sizeScannerSetup
+    )(
       p.setup,
       p.proof.quote,
       p.proof.config,
@@ -559,7 +613,10 @@ export function parseScannerBook(
       p.entry !== plan.entry ||
       p.plannedRisk !== plan.risk ||
       p.estimatedCharges !== plan.planningCharges ||
-      p.slippageAllowance !== p.proof.config.slippage
+      p.slippageAllowance !==
+        (p.setup.version === SCANNER_3R_VERSION
+          ? plan.executionReserve
+          : p.proof.config.slippage)
     )
       invalid();
     const comparison = b.comparisons.find((c) => c.id === p.proof.comparisonId),
@@ -618,6 +675,15 @@ export function parseScannerBook(
       Date.parse(sorted[i].enteredAt) < Date.parse(sorted[i - 1].exitedAt!)
     )
       invalid();
+  for (const p of b.positions.filter(
+    (p) => p.setup.version === SCANNER_3R_VERSION
+  ))
+    if (
+      b.positions.filter((other) =>
+        sameDay(other.enteredAt, new Date(p.enteredAt))
+      ).length > 1
+    )
+      invalid();
   return b;
 }
 export function mergeScannerBackup(
@@ -626,7 +692,7 @@ export function mergeScannerBackup(
   study: PaperBook,
   now = new Date()
 ) {
-  const merged = { ...current };
+  const merged = { ...current, version: 2 as const };
   for (const key of [
     'positions',
     'comparisons',
@@ -668,8 +734,22 @@ export function assertNoSharedOverlap(scanner: ScannerBook, study: PaperBook) {
       throw new Error(
         'Backup overlaps a study/scanner position. Resolve the source records before restoring.'
       );
+  for (const p of scanner.positions.filter(
+    (p) => p.setup.version === SCANNER_3R_VERSION
+  ))
+    if (
+      intervals.filter((other) =>
+        sameDay(other.enteredAt, new Date(p.enteredAt))
+      ).length > 1
+    )
+      throw new Error(
+        'Backup exceeds the scanner 3R single-entry day across journals. Existing records were not changed.'
+      );
 }
-export function scannerCSV(book: ScannerBook) {
+export function scannerCSV(
+  book: ScannerBook,
+  version: CashStrategyVersion = SCANNER_3R_VERSION
+) {
   const cell = (v: unknown) =>
     '"' +
     String(v ?? '')
@@ -693,9 +773,10 @@ export function scannerCSV(book: ScannerBook) {
       'net_paper_pl',
       'notes',
       'exit_notes',
+      'strategy_version',
     ],
   ];
-  for (const p of book.positions)
+  for (const p of scannerVersionBook(book, version).positions)
     rows.push([
       p.origin,
       p.setup.symbol,
@@ -715,6 +796,7 @@ export function scannerCSV(book: ScannerBook) {
         : '',
       p.notes,
       p.exitNotes,
+      p.setup.version,
     ]);
   return rows.map((r) => r.map(cell).join(',')).join('\r\n');
 }

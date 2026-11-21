@@ -19,12 +19,12 @@ function context(symbol = 'SBIN') {
       errors: {},
       completedAt: f.now.toISOString(),
     },
-    // Test-only favourable cost assumptions; production defaults are unchanged.
+    // Active 3R defaults, including full execution and tax reserves.
     config: {
       riskBudget: 50,
       cash: 9500,
-      slippage: 0.25,
-      roundingReserve: 0,
+      slippage: 5,
+      roundingReserve: 1,
       extraCharges: 0,
     },
   };

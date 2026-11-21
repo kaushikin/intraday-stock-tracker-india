@@ -43,6 +43,8 @@ export type ScanPlan = ReturnType<typeof cashCostScenario> & {
   stop: number;
   target: number;
   spread: number;
+  executionReserve?: number;
+  taxReserve?: number;
 };
 export type ScanResult = {
   symbol: string;

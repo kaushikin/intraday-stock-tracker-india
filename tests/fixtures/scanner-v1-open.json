@@ -1,0 +1,158 @@
+{
+  "version": 1,
+  "kind": "SCANNER_EXPLORATORY_PAPER",
+  "positions": [
+    {
+      "id": "cash-pullback-v1:SBIN:2026-11-20T04:10:00.000Z",
+      "mode": "PAPER",
+      "origin": "SCANNER_EXPLORATORY_PAPER",
+      "setup": {
+        "id": "cash-pullback-v1:SBIN:2026-11-20T04:10:00.000Z",
+        "version": "cash-pullback-v1",
+        "symbol": "SBIN",
+        "side": "BUY",
+        "barTime": "2026-11-20T04:10:00.000Z",
+        "createdAt": "2026-11-20T04:15:00.000Z",
+        "expiresAt": "2026-11-20T04:25:00.000Z",
+        "entry": 202.21,
+        "stop": 194.99,
+        "target": 216.65,
+        "tickSize": 0.01
+      },
+      "entry": 202.21,
+      "quantity": 5,
+      "enteredAt": "2026-11-20T04:15:05.000Z",
+      "plannedRisk": 48.53,
+      "estimatedCharges": 12.18,
+      "slippageAllowance": 0.25,
+      "notes": "Event calendar checked; supervised fixture.",
+      "proof": {
+        "chargeSchedule": "angel-nse-intraday-2026-11-22-cap-v2",
+        "quote": {
+          "price": 202.21,
+          "change": 0,
+          "ask": 202.21,
+          "bid": 202.2,
+          "askQuantity": 100,
+          "tickSize": 0.01,
+          "instrumentAsOf": "2026-11-20",
+          "exchangeTime": "2026-11-20T04:15:05.000Z",
+          "lastUpdated": "2026-11-20T04:15:05.000Z"
+        },
+        "config": {
+          "riskBudget": 50,
+          "cash": 9500,
+          "slippage": 0.25,
+          "roundingReserve": 0,
+          "extraCharges": 0
+        },
+        "plan": {
+          "atStop": {
+            "brokerage": 10,
+            "exchange": 0.060968214,
+            "ipft": 0.000001986,
+            "sebi": 0.001986,
+            "stt": 0.24373750000000002,
+            "stamp": 0.030331500000000004,
+            "gst": 1.811332116,
+            "total": 12.15
+          },
+          "atTarget": {
+            "brokerage": 10,
+            "exchange": 0.06429291570000001,
+            "ipft": 0.0000020943000000000004,
+            "sebi": 0.0020943,
+            "stt": 0.2708125,
+            "stamp": 0.030331500000000004,
+            "gst": 1.8119500757999996,
+            "total": 12.18
+          },
+          "planningCharges": 12.18,
+          "risk": 48.53,
+          "reward": 59.77,
+          "cashRequired": 1023.48,
+          "netRR": 1.231609313826499,
+          "eligible": true,
+          "reasons": [],
+          "quantity": 5,
+          "entry": 202.21,
+          "stop": 194.99,
+          "target": 216.65,
+          "spread": 0.010000000000019327
+        },
+        "comparisonId": "legacy-comparison",
+        "feeId": "legacy-fees",
+        "universe": {
+          "asOf": "2026-11-20",
+          "checkedAt": "2026-11-20T04:15:05.000Z",
+          "source": "https://www.niftyindices.com/IndexConstituent/ind_nifty50list.csv"
+        }
+      }
+    }
+  ],
+  "comparisons": [
+    {
+      "id": "legacy-comparison",
+      "at": "2026-11-20T04:15:05.000Z",
+      "snapshot": {
+        "symbol": "SBIN",
+        "tick": 0.01,
+        "capturedAt": "2026-11-20T04:15:05.000Z",
+        "exchangeTime": "2026-11-20T04:15:05.000Z",
+        "ltp": 202.21,
+        "stock": {
+          "time": "2026-11-20T04:10:00.000Z",
+          "open": 200,
+          "high": 202.2,
+          "low": 195,
+          "close": 202.1,
+          "volume": 100
+        },
+        "index": {
+          "time": "2026-11-20T04:10:00.000Z",
+          "open": 200,
+          "high": 202.2,
+          "low": 195,
+          "close": 202.1,
+          "volume": 100
+        }
+      },
+      "broker": {
+        "ltp": 202.21,
+        "quoteTime": "2026-11-20T04:15:05.000Z",
+        "barTime": "2026-11-20T04:10:00.000Z",
+        "stock": {
+          "time": "2026-11-20T04:10:00.000Z",
+          "open": 200,
+          "high": 202.2,
+          "low": 195,
+          "close": 202.1,
+          "volume": 100
+        },
+        "index": {
+          "time": "2026-11-20T04:10:00.000Z",
+          "open": 200,
+          "high": 202.2,
+          "low": 195,
+          "close": 202.1,
+          "volume": 100
+        }
+      },
+      "passed": true,
+      "issues": []
+    }
+  ],
+  "feeChecks": [
+    {
+      "symbol": "SBIN",
+      "key": "[\"SBIN\",\"cash-pullback-v1:SBIN:2026-11-20T04:10:00.000Z\",202.21,5,194.99,216.65,12.18,0.25,0,0,\"angel-nse-intraday-2026-11-22-cap-v2\"]",
+      "atStop": 12.15,
+      "atTarget": 12.18,
+      "source": "BROKER_CALCULATOR",
+      "reference": "Independent test observation",
+      "id": "legacy-fees",
+      "at": "2026-11-20T04:15:05.000Z"
+    }
+  ],
+  "observations": []
+}

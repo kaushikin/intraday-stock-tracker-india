@@ -1,7 +1,7 @@
 require('./load-ts.cjs');
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { evaluateCashPlanProposal } = require('../lib/cashPlanProposal.ts');
+const { evaluateCash3RPlan } = require('../lib/cashPlan.ts');
 const base = {
   entry: 200,
   stop: 198,
@@ -10,8 +10,8 @@ const base = {
   tickSize: 0.05,
 };
 
-test('3R cash proposal fits a small position with higher cost reserves and fails honestly when costs rise', () => {
-  const plan = evaluateCashPlanProposal(base);
+test('3R cash plan fits a small position with higher cost reserves and fails honestly when costs rise', () => {
+  const plan = evaluateCash3RPlan(base);
   assert.equal(plan.target, 206);
   assert.equal(plan.atTarget.total, 12.9);
   assert.equal(plan.executionReserve, 5);
@@ -21,34 +21,35 @@ test('3R cash proposal fits a small position with higher cost reserves and fails
   assert.equal(plan.cashRequired, 3018.9);
   assert.equal(plan.costFeasible, true);
   assert.equal(
-    evaluateCashPlanProposal({ ...base, measuredSlippage: 8 }).costFeasible,
+    evaluateCash3RPlan({ ...base, measuredSlippage: 8 }).costFeasible,
     false
   );
-  const reduced = evaluateCashPlanProposal({ ...base, quantity: 13, measuredSlippage: 8 });
+  const reduced = evaluateCash3RPlan({
+    ...base,
+    quantity: 13,
+    measuredSlippage: 8,
+  });
   assert.equal(reduced.risk, 47.75);
   assert.equal(reduced.reward, 56.25);
   assert.equal(reduced.costFeasible, false);
   assert.equal(
-    evaluateCashPlanProposal({ ...base, extraCharges: 2 }).costFeasible,
+    evaluateCash3RPlan({ ...base, extraCharges: 2 }).costFeasible,
     false
   );
   assert.equal(
-    evaluateCashPlanProposal({ ...base, quantity: 16 }).costFeasible,
+    evaluateCash3RPlan({ ...base, quantity: 16 }).costFeasible,
     false
   );
   assert.equal(
-    evaluateCashPlanProposal({ ...base, riskBudget: 48 }).costFeasible,
+    evaluateCash3RPlan({ ...base, riskBudget: 48 }).costFeasible,
     false
   );
+  assert.equal(evaluateCash3RPlan({ ...base, cash: 3000 }).costFeasible, false);
   assert.equal(
-    evaluateCashPlanProposal({ ...base, cash: 3000 }).costFeasible,
-    false
-  );
-  assert.equal(
-    evaluateCashPlanProposal({ ...base, roundingReserve: 0 }).taxReserve,
+    evaluateCash3RPlan({ ...base, roundingReserve: 0 }).taxReserve,
     1
   );
-  const smallerMove = evaluateCashPlanProposal({
+  const smallerMove = evaluateCash3RPlan({
     entry: 500,
     stop: 497.5,
     quantity: 10,
@@ -61,17 +62,17 @@ test('3R cash proposal fits a small position with higher cost reserves and fails
   assert.equal(smallerMove.costFeasible, true);
 });
 
-test('proposal keeps observed spread limits, enforces the new execution guard and never allows leverage or increased risk', () => {
+test('3R plan keeps observed spread limits, enforces the new execution guard and never allows leverage or increased risk', () => {
   assert.equal(
-    evaluateCashPlanProposal({ ...base, spread: 0.3 }).costFeasible,
+    evaluateCash3RPlan({ ...base, spread: 0.3 }).costFeasible,
     false
   );
   assert.equal(
-    evaluateCashPlanProposal({ ...base, stop: 199, quantity: 15 }).costFeasible,
+    evaluateCash3RPlan({ ...base, stop: 199, quantity: 15 }).costFeasible,
     false
   );
   assert.match(
-    evaluateCashPlanProposal({
+    evaluateCash3RPlan({
       ...base,
       entry: 600,
       stop: 598,
@@ -86,5 +87,5 @@ test('proposal keeps observed spread limits, enforces the new execution guard an
     { spread: NaN },
     { quantity: 1.5 },
   ])
-    assert.throws(() => evaluateCashPlanProposal({ ...base, ...delta }));
+    assert.throws(() => evaluateCash3RPlan({ ...base, ...delta }));
 });
