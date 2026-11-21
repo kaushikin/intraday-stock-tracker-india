@@ -373,16 +373,25 @@ export default function MarketPage() {
           it stricter.
         </p>
         <p className="mt-2 text-xs text-slate-400">
-          The standard two-order brokerage + GST floor is ₹11.80. Your fixed
-          slippage, rounding and extra-charge allowances add{' '}
+          When both order values are at least ₹200, the standard minimum
+          two-order brokerage + GST is ₹11.80. Smaller orders are subject to the
+          exchange brokerage ceiling, now included. Your fixed slippage,
+          rounding and extra-charge allowances add{' '}
           {money(
             (config.value?.slippage || 0) +
               (config.value?.roundingReserve || 0) +
               (config.value?.extraCharges || 0)
           )}
-          , before other levies. The defaults leave almost no headroom. Verify
-          costs independently; do not reduce them just to create candidates.
+          , before other levies. With the default reserves and normal minimum
+          brokerage, the current 2R rules cannot qualify a trade within ₹50.
+          Verify costs independently; do not reduce them to create candidates.
         </p>
+        <Link
+          href="/cash-plan"
+          className="mt-3 inline-block text-sm text-teal-300 underline"
+        >
+          Review the ₹10,000 cash plan proposal — existing studies unchanged
+        </Link>
       </section>
       <section className={card}>
         <p className="text-sm">

@@ -4,6 +4,8 @@ A private Next.js 14 application for Indian cash-equity research and journaling.
 
 Repository: https://github.com/kaushikin/intraday-stock-tracker-india
 
+The [₹10,000 cash plan proposal](docs/cash-plan-v2-proposal.md), also available at `/cash-plan`, explains a separately versioned 3R research approach with larger cost reserves and the same ₹50 risk cap. It is read-only and is not active in either journal. The fee-ceiling correction is active; historical evidence retains its original calculation version.
+
 ## Practice workflow
 
 Start with the [Monday verification checklist](docs/monday-checklist.md), also linked from Practice. It covers share selection, Angel One data comparison, broker charges and the entry checklist.
@@ -38,7 +40,7 @@ At ₹50 total risk, a 2R target can meet net R:R 1.2 only if total estimated ch
 
 **Data status** distinguishes request failures, partial responses, exchange freshness, missing depth and historical closed-session snapshots. It shows exchange and receipt timestamps, last completed bars, request times and per-symbol failures. The fixed study symbols take priority in the 18-cash-share request budget, plus two index candle feeds. An OK request does not by itself mean the data is current.
 
-**Broker charges** calculates the published standard Angel One NSE intraday tariff, reviewed 21 November 2026, for one buy order and one sell order. It itemizes brokerage, exchange/IPFT, SEBI, STT, stamp and GST and keeps a separate tax-rounding reserve. [Angel tariff](https://www.angelone.in/exchange-transaction-charges) and [NSE FA/73061](https://nsearchives.nseindia.com/content/circulars/FA73061.pdf) are linked in the panel. Account-specific offers/caps, additional orders, delivery and account fees need separate checking.
+**Broker charges** calculates the published standard Angel One NSE intraday tariff, reviewed 22 November 2026, for one buy order and one sell order. It itemizes brokerage, exchange/IPFT, SEBI, STT, stamp and GST and keeps a separate tax-rounding reserve. The normal brokerage is capped separately per leg at 2.5% of value, or ₹0.25 per share for prices at/below ₹10, before GST. [Angel tariff](https://www.angelone.in/exchange-transaction-charges), [SEBI question 19](https://www.sebi.gov.in/sebi_data/faqfiles/sep-2024/1727418208774.pdf) and [NSE FA/73061](https://nsearchives.nseindia.com/content/circulars/FA73061.pdf) are linked in the panel. Account-specific offers, additional orders, delivery and account fees need separate checking. Old charge comparisons and scanner proofs replay their saved estimator without rewriting history. New Practice entries require the full estimated stop/target charges, not a partial brokerage/GST floor.
 
 For the hypothetical entry ₹200 / stop ₹196 / target ₹208 with nine shares, published round-trip estimates are ₹12.43 at the stop and ₹12.46 at target. A ₹1 slippage allowance and ₹0.50 rounding reserve produce ₹49.96 planned risk but only 1.162 net R:R, so it fails. Lower-cost assumptions can fit mathematically, but no actual eligible market trade or account-specific fee schedule has been verified. Never alter assumed costs to force eligibility.
 

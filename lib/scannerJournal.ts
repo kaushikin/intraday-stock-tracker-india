@@ -31,7 +31,11 @@ import {
 import type { ScannerData } from './scannerFeed';
 import { NIFTY50_SOURCE, type NiftyUniverse } from './nifty50';
 import { STRATEGY_VERSION } from './paperStrategy';
-import { estimateCashCharges } from './brokerCharges';
+import {
+  estimateCashCharges,
+  CHARGE_SCHEDULE,
+  LEGACY_CHARGE_SCHEDULE_ID,
+} from './brokerCharges';
 
 export const SCANNER_BOOK_KEY = 'scanner_paper_journal_v1';
 const NIFTY50_ALTERNATE_SOURCE =
@@ -50,6 +54,8 @@ export type ScannerFeeCheck = {
 export type ScannerPosition = PaperPosition & {
   origin: typeof SCANNER_BOOK_KIND;
   proof: {
+    // Missing only on backups created before calculation version 2.
+    chargeSchedule?: string;
     quote: PriceData;
     config: ScanConfig;
     plan: ScanPlan;
@@ -217,7 +223,8 @@ export function scannerFeeKey(
   symbol: string,
   setupId: string,
   plan: ScanPlan,
-  config: ScanConfig
+  config: ScanConfig,
+  chargeSchedule: string = CHARGE_SCHEDULE.id
 ) {
   return JSON.stringify([
     symbol,
@@ -230,6 +237,7 @@ export function scannerFeeKey(
     config.slippage,
     config.roundingReserve,
     config.extraCharges,
+    ...(chargeSchedule === LEGACY_CHARGE_SCHEDULE_ID ? [] : [chargeSchedule]),
   ]);
 }
 export function saveScannerFees(
@@ -382,6 +390,7 @@ export function openScannerPosition(
     slippageAllowance: check.config.slippage,
     notes: notes.trim(),
     proof: {
+      chargeSchedule: CHARGE_SCHEDULE.id,
       quote: { ...context.data.quotes[context.symbol] },
       config: { ...check.config },
       plan: { ...plan! },
@@ -510,6 +519,8 @@ export function parseScannerBook(
     if (
       !p?.setup ||
       !p.proof ||
+      (p.proof.chargeSchedule !== undefined &&
+        typeof p.proof.chargeSchedule !== 'string') ||
       p.origin !== SCANNER_BOOK_KIND ||
       p.mode !== 'PAPER' ||
       p.id !== p.setup.id ||
@@ -536,7 +547,8 @@ export function parseScannerBook(
       p.setup,
       p.proof.quote,
       p.proof.config,
-      entered
+      entered,
+      p.proof.chargeSchedule ?? LEGACY_CHARGE_SCHEDULE_ID
     );
     const plan = sized.plan;
     if (
@@ -561,7 +573,13 @@ export function parseScannerBook(
       !past(fees.at, entered) ||
       !sameDay(fees.at, entered) ||
       fees.key !==
-        scannerFeeKey(p.setup.symbol, p.setup.id, plan!, p.proof.config) ||
+        scannerFeeKey(
+          p.setup.symbol,
+          p.setup.id,
+          plan!,
+          p.proof.config,
+          p.proof.chargeSchedule ?? LEGACY_CHARGE_SCHEDULE_ID
+        ) ||
       Math.max(fees.atStop, fees.atTarget) + p.proof.config.roundingReserve >
         plan!.planningCharges + 1e-8
     )

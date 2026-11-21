@@ -1,5 +1,5 @@
 import type { CandleData, PriceData } from '@/contexts/AppContext';
-import { cashCostScenario } from './brokerCharges';
+import { cashCostScenario, CHARGE_SCHEDULE } from './brokerCharges';
 import { findPaperSetup, type PaperSetup } from './paperStrategy';
 import { quoteProblem } from './marketDataQuality';
 import { isFreshSignalWindowOpenIST, istDateKey } from './marketHours';
@@ -58,7 +58,8 @@ export function sizeScannerSetup(
   setup: PaperSetup,
   quote: PriceData,
   config: ScanConfig,
-  now = new Date()
+  now = new Date(),
+  chargeSchedule: string = CHARGE_SCHEDULE.id
 ): { plan?: ScanPlan; reasons: string[] } {
   validateScanConfig(config);
   const reasons: string[] = [];
@@ -129,6 +130,7 @@ export function sizeScannerSetup(
       roundingReserve: config.roundingReserve + config.extraCharges,
       riskBudget: config.riskBudget,
       cash: config.cash,
+      chargeSchedule,
     });
     const plan = {
       ...scenario,

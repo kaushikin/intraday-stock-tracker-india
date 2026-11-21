@@ -4,6 +4,7 @@ import { istDateKey, isFreshSignalWindowOpenIST } from './marketHours';
 import { BAR_MS, quoteProblem } from './marketDataQuality';
 import { calculatePositionSizing } from './positionSizing';
 import { PaperSetup, STRATEGY_VERSION } from './paperStrategy';
+import { estimateCashCharges } from './brokerCharges';
 import {
   validateResearchEvidence,
   type ResearchEvidence,
@@ -234,10 +235,17 @@ export function previewPaperEntry(
     );
   if (
     q > 0 &&
-    charges < 2 * Math.max(5, Math.min(20, q * entry * 0.001)) * 1.18
+    [entry, setup.stop, setup.target].every(
+      (n) => Number.isFinite(n) && n > 0
+    ) &&
+    charges + 1e-8 <
+      Math.max(
+        estimateCashCharges(entry, setup.stop, q).total,
+        estimateCashCharges(entry, setup.target, q).total
+      )
   )
     reasons.push(
-      'Charge estimate is below the published Angel cash brokerage plus GST floor. Add all other levies too.'
+      'Charge estimate is below the published round-trip charges at stop/target. Include brokerage, taxes and all levies.'
     );
   if (q > 0 && entry - bid + slippage / q > distance * 0.1)
     reasons.push('Spread plus slippage exceeds 10% of the stop distance.');

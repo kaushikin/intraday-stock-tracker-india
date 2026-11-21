@@ -444,7 +444,12 @@ export function validateResearchEvidence(
       throw new Error('A saved market comparison is inconsistent.');
   }
   for (const c of raw.chargeChecks) {
-    const estimate = estimateCashCharges(c.entry, c.exit, c.quantity).total;
+    const estimate = estimateCashCharges(
+      c.entry,
+      c.exit,
+      c.quantity,
+      c.schedule
+    ).total;
     if (
       !['BROKER_CALCULATOR', 'CONTRACT_NOTE'].includes(c.source) ||
       typeof c.reference !== 'string' ||
@@ -457,7 +462,7 @@ export function validateResearchEvidence(
       c.tradeDate > istDateKey(new Date(c.at)) ||
       !Number.isFinite(c.brokerTotal) ||
       c.brokerTotal < 0 ||
-      c.schedule !== CHARGE_SCHEDULE.id ||
+      typeof c.schedule !== 'string' ||
       c.estimatedTotal !== estimate ||
       c.difference !== Math.round((c.brokerTotal - estimate) * 100) / 100
     )

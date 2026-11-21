@@ -5,7 +5,7 @@ Open **Scan** (`/market`). This replaces the legacy market overview and its brok
 ## Run a scan
 
 1. Confirm the standalone risk and cash scenario: up to ₹50 total planned risk and ₹9,500 unleveraged cash from the ₹10,000 baseline. Lower these if less is actually available. The shortlist is a standalone scenario. Its separate paper journal rechecks remaining combined cash/loss limits before an entry.
-2. Keep realistic slippage, tax-rounding and any extra round-trip charges. Defaults remain ₹1 / ₹0.50 / ₹0. Published Angel charges are estimates, not verified account costs. The cost-headroom panel explains why these defaults may yield no candidates.
+2. Keep realistic slippage, tax-rounding and any extra round-trip charges. Defaults remain ₹1 / ₹0.50 / ₹0. Published Angel charges are estimates, not verified account costs. With normal minimum brokerage these defaults cannot qualify under the current 2R / 1.2-net-RR rules. Small-order legal brokerage caps are now included. See the separate [cash-plan proposal](cash-plan-v2-proposal.md); it does not activate new scanner rules.
 3. Click **Scan Nifty 50** in the 09:45–11:15 IST entry window. Outside it, **Check Nifty 50 feeds** performs a connection check only; there is no live shortlist. Keep the tab visible. A full run can take a few minutes.
 4. Optional repeat scans run five minutes after the previous run finishes, while visible and in the entry window. No overlapping scan starts. Hiding the tab or leaving the page cancels the current run. Reopen and run again; there is no background or closed-app monitoring.
 5. Review up to five current shortlist results, ordered by estimated net reward/risk, then spread and symbol. This ordering is not a calibrated probability of winning. Expand **All 50 results** for exclusions and provider failures.
@@ -36,5 +36,5 @@ At ₹50 risk and a 2R price target, total costs must be at most ₹13.33 before
 - Raw scan snapshots are kept in component memory and optional exported JSON; reloading clears them. Explicit paper trades, comparisons, fee checks and notes persist separately in browser storage. Back up both journals; the samples are not pooled.
 - Displayed shortlist fit refers to the entered standalone scenario. The journal recomputes sizing using remaining shared cash/risk, enforces one open position and two entries/day across both journals, and requires saved broker comparisons and exact-plan fee evidence.
 - The existing calendar covers regular 2026 NSE sessions and fails closed in unverified years.
-- Published fees do not cover extra orders, delivery/DP, call-and-trade, account charges or special account offers/caps; keep differences in the extra-charge reserve and verify actual costs.
+- Published fees include the per-order exchange brokerage ceiling, but not extra orders, delivery/DP, call-and-trade, account charges or special account offers; keep differences in the extra-charge reserve and verify actual costs.
 - A live Monday broker-terminal comparison is still required. Off-hours tests establish connectivity, not a tradable setup, fill quality, profitability or a 70% win rate.

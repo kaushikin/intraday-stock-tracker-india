@@ -55,6 +55,6 @@ This implementation has not established profitability, a 70% win rate, live fill
 
 - [FinBERT model card](https://huggingface.co/ProsusAI/finbert): financial-text sentiment.
 - [Hugging Face text classification](https://huggingface.co/docs/inference-providers/tasks/text-classification): label/score output.
-- [Angel One brokerage](https://www.angelone.in/support/charges-and-cashbacks/brokerage-charges): verify the actual account plan; the entry guard retains its existing partial floor, while the separate calculator itemizes the standard tariff.
+- [Angel One brokerage](https://www.angelone.in/support/charges-and-cashbacks/brokerage-charges): verify the actual account plan. As of the 22 November fee correction, the entry guard requires the full estimated stop/target charges with the exchange brokerage ceiling; saved positions and old charge evidence remain unchanged.
 - [Angel One complete tariff](https://www.angelone.in/exchange-transaction-charges) and [NSE FA/73061](https://nsearchives.nseindia.com/content/circulars/FA73061.pdf): current published charges, distinct from account verification.
 - [NSE 2026 holidays](https://nsearchives.nseindia.com/content/circulars/CMTR71775.pdf) and [additional January closure](https://nsearchives.nseindia.com/content/circulars/CMTR72260.pdf).

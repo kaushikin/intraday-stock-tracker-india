@@ -65,7 +65,9 @@ export default function BrokerChargesPanel({
         }),
       };
     } catch (e) {
-      return { error: e instanceof Error ? e.message : 'Invalid calculation.' };
+      return {
+        error: e instanceof Error ? e.message : 'Invalid calculation.',
+      };
     }
   }, [values, riskBudget, cash]);
   let comparisonEstimate: number | undefined;
@@ -116,6 +118,12 @@ export default function BrokerChargesPanel({
         Hypothetical calculator, not a trading signal. One buy order and one
         sell order, no leverage. Compare exact quantity and prices with the
         broker before using the amount in the entry checklist.
+      </p>
+      <p className="mt-2 text-xs text-slate-400">
+        Brokerage now respects the exchange ceiling on each order: 2.5% of
+        value, or ₹0.25 per share when the share price is ₹10 or less. The
+        normal ₹5 minimum applies only within that ceiling. Saved comparisons
+        retain their original calculation version.
       </p>
       <div className="mt-4 grid grid-cols-2 gap-3">
         {(Object.keys(values) as (keyof typeof values)[]).map((key) => (
@@ -228,9 +236,9 @@ export default function BrokerChargesPanel({
       )}
       <p className="mt-3 text-xs text-slate-400">
         Excludes extra orders, delivery/DP fees, call-and-trade fees, account
-        charges and account-specific offers or caps. Use the higher verified
-        costs if your broker charges more. Never lower costs or enlarge risk to
-        make a trade fit.
+        charges and account-specific offers. Use the higher verified costs if
+        your broker charges more. Never lower costs or enlarge risk to make a
+        trade fit.
       </p>
       <p className="mt-2 text-xs">
         <a
@@ -249,6 +257,15 @@ export default function BrokerChargesPanel({
           className="text-teal-300 underline"
         >
           NSE transaction/IPFT circular
+        </a>{' '}
+        ·{' '}
+        <a
+          href={CHARGE_SCHEDULE.brokerageCapSource}
+          target="_blank"
+          rel="noreferrer"
+          className="text-teal-300 underline"
+        >
+          SEBI brokerage ceiling (question 19)
         </a>
       </p>
       <h3 className="mt-5 font-semibold">Reconcile with your broker</h3>
