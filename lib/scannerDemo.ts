@@ -10,8 +10,37 @@ import { estimateCashCharges } from './brokerCharges';
 
 export const DEMO_DAY = '2026-11-23';
 export const DEMO_ENTRY_TIME = '09:48:10';
-export const DEMO_EXIT_TIME = '09:58:00';
-export const DEMO_EXIT_BID = 197.9;
+export const DEMO_TIME_EXIT_DUE = '10:18:10';
+export const DEMO_EXIT_SCENARIOS = {
+  STOP: {
+    label: 'Stop-loss exit',
+    reasonLabel: 'Stop reached',
+    time: '09:58:00',
+    bid: 197.9,
+    explanation:
+      'The bid moves through the ₹198 stop before the time limit. Use the observed ₹197.90 bid, not an assumed fill at the stop.',
+    note: 'Fictional bid ₹197.90 at 09:58; price moved through the stop.',
+  },
+  TARGET: {
+    label: 'Target-hit exit',
+    reasonLabel: 'Target reached',
+    time: '10:02:00',
+    bid: 206,
+    explanation:
+      'The bid reaches the ₹206 target before the stop or time limit. Exit at the observed bid; do not extend the target to wait for more profit.',
+    note: 'Fictional bid ₹206 at 10:02; target reached before stop or time limit.',
+  },
+  TIME: {
+    label: '30-minute time exit',
+    reasonLabel: '30-minute time exit',
+    time: DEMO_TIME_EXIT_DUE,
+    bid: 201,
+    explanation:
+      'Neither stop nor target was reached in this fictional path. At 10:18:10, exactly 30 minutes after entry, exit at the observed ₹201 bid. Do not extend the deadline to wait for the target.',
+    note: 'Fictional bid ₹201 at 10:18:10; 30 minutes elapsed without a stop or target hit.',
+  },
+} as const;
+export type DemoExitScenario = keyof typeof DEMO_EXIT_SCENARIOS;
 export const demoTime = (time: string) => `${DEMO_DAY}T${time}+05:30`;
 export const DEMO_FIELDS = [
   ['ltp', 'Demo broker stock LTP', 'number'],
@@ -199,12 +228,17 @@ export function checkDemoFees(
   return [];
 }
 
-export function demoExitCharges(demo: ONGCDemo) {
+export function demoExitCharges(
+  demo: ONGCDemo,
+  scenario: DemoExitScenario = 'STOP'
+) {
+  if (!Object.hasOwn(DEMO_EXIT_SCENARIOS, scenario))
+    throw new Error('Choose a supported demo exit scenario.');
   return (
     Math.round(
       (estimateCashCharges(
         demo.plan.entry,
-        DEMO_EXIT_BID,
+        DEMO_EXIT_SCENARIOS[scenario].bid,
         demo.plan.quantity
       ).total +
         demo.plan.taxReserve!) *
@@ -220,35 +254,45 @@ export function checkDemoExit(
     fees: string;
     reason: string;
     notes: string;
-  }
+  },
+  scenario: DemoExitScenario = 'STOP'
 ): string[] {
+  if (!Object.hasOwn(DEMO_EXIT_SCENARIOS, scenario))
+    return ['Choose a supported demo exit scenario.'];
+  const observed = DEMO_EXIT_SCENARIOS[scenario];
   const issues: string[] = [];
   if (
     !values.price.trim() ||
-    Math.abs(Number(values.price) - DEMO_EXIT_BID) > 1e-8 ||
+    Math.abs(Number(values.price) - observed.bid) > 1e-8 ||
     !Number.isFinite(Number(values.price))
   )
     issues.push(
-      'Use the fictional observed bid ₹197.90, not an assumed ₹198 stop fill.'
+      scenario === 'STOP'
+        ? 'Use the fictional observed bid ₹197.90, not an assumed ₹198 stop fill.'
+        : `Use the fictional observed bid ₹${observed.bid.toFixed(2)} for this ${observed.label.toLowerCase()}.`
     );
   if (
     !timeInput(values.time) ||
     Date.parse(demoTime(values.time)) !==
-      Date.parse(demoTime(DEMO_EXIT_TIME))
+      Date.parse(demoTime(observed.time))
   )
-    issues.push('Use the fictional observed exit time 09:58:00 IST.');
+    issues.push(
+      scenario === 'TIME'
+        ? `The 30-minute exit is due at ${DEMO_TIME_EXIT_DUE} IST, 30 minutes after entry. Use that fictional observation time.`
+        : `Use the fictional observed exit time ${observed.time} IST.`
+    );
   if (
     !values.fees.trim() ||
     !Number.isFinite(Number(values.fees)) ||
     !Number.isSafeInteger(Math.round(Number(values.fees) * 100)) ||
-    Number(values.fees) + 1e-8 < demoExitCharges(demo)
+    Number(values.fees) + 1e-8 < demoExitCharges(demo, scenario)
   )
     issues.push(
       'Include full estimated round-trip charges plus the ₹1 rounding allowance.'
     );
-  if (values.reason !== 'STOP')
+  if (values.reason !== scenario)
     issues.push(
-      'This exercise reaches the stop before the time limit. Choose Stop reached.'
+      `This scenario requires ${observed.reasonLabel}. Choose the reason matching the observed event.`
     );
   if (!values.notes.trim())
     issues.push('Add a demo exit source and supervision note.');

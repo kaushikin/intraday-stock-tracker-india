@@ -34,7 +34,17 @@ Old open 2R scanner positions remain manageable under their original stop, targe
 
 ## Using the release
 
-For a rehearsal, open **Scan → Open ONGC practice demo** (`/market/demo`). All prices, candles, depth and times are fictional. The isolated route does not mount the normal application providers or journal hooks. Data/fee checks and the simulated entry/exit are temporary memory only; reset/refresh clears them without touching old trades, either journal, the watchlist, research counters or account risk limits. No demo export, import, live market request or broker order exists. A mismatch or changed readings invalidates readiness; the fixed exercise accepts a matched price/candle comparison and fees covering the current tariff. It then rehearses a 15-share ₹200 entry, ₹198 stop, ₹206 target and ₹197.90 stop exit with ₹13.86 total estimated charges, producing −₹45.36. Demo success is not actual broker verification. Leave any ongoing paper-position supervision complete before practising.
+For a rehearsal, open **Scan → Open ONGC practice demo** (`/market/demo`). All prices, candles, depth and times are fictional. The isolated route does not mount the normal application providers or journal hooks. Data/fee checks and the simulated entry/exit are temporary memory only; reset/refresh clears them without touching old trades, either journal, the watchlist, research counters or account risk limits. No demo export, import, live market request or broker order exists. A mismatch or changed readings invalidates readiness; the fixed exercise accepts a matched price/candle comparison and fees covering the current tariff. All scenarios rehearse the same 15-share ₹200 entry, ₹198 stop and ₹206 target. The **Demo exit scenario** selector chooses a stop-loss, target-hit or 30-minute time exit. Changing scenarios clears all temporary checks, entry and exit state; Reset demo repeats the current scenario. Wrong exit reasons, mismatched observed prices/times and insufficient charges are rejected, including a time exit before the 30-minute deadline. Demo success is not actual broker verification. Leave any ongoing paper-position supervision complete before practising.
+
+Fictional exit examples, including the ₹1 rounding allowance in total charges:
+
+| Scenario | Observed bid | Observed IST time | Total estimated charges | Net demo P/L |
+|---|---:|---|---:|---:|
+| Stop-loss exit | ₹197.90 | 09:58:00 | ₹13.86 | −₹45.36 |
+| Target-hit exit | ₹206.00 | 10:02:00 | ₹13.90 | +₹76.10 |
+| 30-minute time exit | ₹201.00 | 10:18:10 | ₹13.87 | +₹1.13 |
+
+Entry is simulated at 09:48:10. The target is reached before the stop/deadline in its scenario; neither price level is reached before the deadline in the time-exit scenario. The original ₹5 execution reserve is a planning allowance and is not subtracted again from observed-price P/L, so the exact-target result differs from the conservative ₹71.10 planned net target reward. All three outcomes are exercises, not live data or performance evidence.
 
 The full ten-step Monday checklist is built into **Scan**, above the budget controls, at `/market#scanner-monday-checklist`. It includes expandable instructions and links to the data comparison, exact fee check, entry, open-position exit, notes and backup forms. Before selecting a candidate, data/fee/entry links lead to the candidate review instructions. The guide itself does not record verification evidence or write either journal; the existing saved checks still govern entry eligibility.
 

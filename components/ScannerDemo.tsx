@@ -5,8 +5,8 @@ import {
   createONGCDemo,
   DEMO_FIELDS,
   DEMO_ENTRY_TIME,
-  DEMO_EXIT_TIME,
-  DEMO_EXIT_BID,
+  DEMO_EXIT_SCENARIOS,
+  DEMO_TIME_EXIT_DUE,
   emptyDemoReadings,
   matchingDemoReadings,
   checkDemoReadings,
@@ -14,6 +14,7 @@ import {
   checkDemoExit,
   demoExitCharges,
   type DemoReadings,
+  type DemoExitScenario,
 } from '@/lib/scannerDemo';
 import { CHARGE_SCHEDULE } from '@/lib/brokerCharges';
 
@@ -25,6 +26,8 @@ const button =
 const secondary =
   'rounded-xl border border-indigo-400 px-3 py-2 text-sm disabled:opacity-40';
 const money = (n: number) => `₹${n.toFixed(2)}`;
+const signedMoney = (n: number) =>
+  `${n < 0 ? '−' : '+'}${money(Math.abs(n))}`;
 
 function Issues({ items }: { items: string[] }) {
   return items.length ? (
@@ -41,6 +44,8 @@ function Issues({ items }: { items: string[] }) {
 
 export default function ScannerDemo() {
   const [attempt, setAttempt] = useState(0);
+  const [exitScenario, setExitScenario] =
+    useState<DemoExitScenario>('STOP');
   return (
     <div className="space-y-5 pb-8">
       <header className="space-y-3">
@@ -70,6 +75,30 @@ export default function ScannerDemo() {
           Use the demo when you have no open paper position to supervise.
           Return to Scan or Practice to manage existing positions.
         </p>
+        <label className="block text-sm">
+          Demo exit scenario
+          <select
+            id="demo-exit-scenario"
+            className={`${input} scroll-mt-6`}
+            value={exitScenario}
+            onChange={(e) => {
+              if (Object.hasOwn(DEMO_EXIT_SCENARIOS, e.target.value))
+                setExitScenario(e.target.value as DemoExitScenario);
+            }}
+          >
+            {Object.entries(DEMO_EXIT_SCENARIOS).map(([key, option]) => (
+              <option key={key} value={key}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="text-xs leading-5 text-slate-300">
+          Choose stop-loss, target-hit or 30-minute time exit. Changing the
+          scenario restarts the exercise, including data and fee checks.
+          Reset demo restarts your selected scenario. Neither action
+          touches a journal.
+        </p>
         <button
           className={secondary}
           onClick={() => setAttempt((n) => n + 1)}
@@ -77,12 +106,19 @@ export default function ScannerDemo() {
           Reset demo
         </button>
       </header>
-      <DemoExercise key={attempt} />
+      <DemoExercise
+        key={`${exitScenario}:${attempt}`}
+        exitScenario={exitScenario}
+      />
     </div>
   );
 }
 
-function DemoExercise() {
+function DemoExercise({
+  exitScenario,
+}: {
+  exitScenario: DemoExitScenario;
+}) {
   const [scenario] = useState(() => {
     try {
       return { demo: createONGCDemo(), error: '' };
@@ -132,7 +168,8 @@ function DemoExercise() {
       </p>
     );
   const demo = scenario.demo,
-    plan = demo.plan;
+    plan = demo.plan,
+    outcome = DEMO_EXIT_SCENARIOS[exitScenario];
   const entryAllowed =
     phase === 'review' &&
     captured &&
@@ -155,8 +192,8 @@ function DemoExercise() {
     setFeeIssues([]);
   }
   const clock =
-    phase === 'closed'
-      ? DEMO_EXIT_TIME
+    phase === 'closed' || (phase === 'open' && exit.time === outcome.time)
+      ? outcome.time
       : phase === 'open'
         ? DEMO_ENTRY_TIME
         : feesPassed
@@ -167,6 +204,9 @@ function DemoExercise() {
   return (
     <>
       <div className={card}>
+        <p className="mb-2 text-sm text-indigo-300">
+          Selected exercise: {outcome.label}
+        </p>
         <p className="font-semibold">
           Exercise clock: {clock} IST · fictional Monday
         </p>
@@ -514,15 +554,18 @@ function DemoExercise() {
         </h2>
         {phase === 'review' ? (
           <p className="mt-2 text-sm text-slate-300">
-            Simulate the entry to unlock the fictional stop-loss exit.
+            Simulate the entry to unlock the fictional{' '}
+            {outcome.label.toLowerCase()}.
           </p>
         ) : (
           <>
             <p className="mt-2 text-sm leading-6">
-              Time exit would be due at 10:18:10 IST. In this scenario the
-              bid reaches <strong>₹197.90 at 09:58:00</strong>, through the
-              ₹198 stop. Stop reached is the correct reason; do not wait
-              for the time limit.
+              Time exit is due at {DEMO_TIME_EXIT_DUE} IST. This scenario’s
+              fictional observed bid is{' '}
+              <strong>
+                {money(outcome.bid)} at {outcome.time} IST
+              </strong>
+              . {outcome.explanation}
             </p>
             <p className="mt-2 text-sm leading-6">
               In Scan, keep the position visible and supervise it. Alerts
@@ -539,9 +582,9 @@ function DemoExercise() {
                 onClick={() => {
                   setExit((v) => ({
                     ...v,
-                    price: String(DEMO_EXIT_BID),
-                    time: DEMO_EXIT_TIME,
-                    fees: String(demoExitCharges(demo)),
+                    price: String(outcome.bid),
+                    time: outcome.time,
+                    fees: String(demoExitCharges(demo, exitScenario)),
                   }));
                   setExitIssues([]);
                 }}
@@ -587,10 +630,10 @@ function DemoExercise() {
                 />
               </label>
               <p className="text-xs leading-5 text-slate-300">
-                At least {money(demoExitCharges(demo))}: estimated
-                buy-and-sell charges plus ₹1 rounding. The observed adverse
-                price already affects P/L; do not subtract the original ₹5
-                execution reserve again.
+                At least {money(demoExitCharges(demo, exitScenario))}:
+                estimated buy-and-sell charges plus ₹1 rounding. The
+                observed prices already affect P/L; do not subtract
+                the original ₹5 execution reserve again.
               </p>
               <label className="block text-xs">
                 Demo exit reason
@@ -617,14 +660,14 @@ function DemoExercise() {
                   onChange={(e) =>
                     setExit((v) => ({ ...v, notes: e.target.value }))
                   }
-                  placeholder="Fictional bid ₹197.90 at 09:58; price moved through the stop."
+                  placeholder={outcome.note}
                 />
               </label>
               <button
                 className={button}
                 onClick={() => {
                   if (phase !== 'open') return;
-                  const issues = checkDemoExit(demo, exit);
+                  const issues = checkDemoExit(demo, exit, exitScenario);
                   setExitIssues(issues);
                   if (!issues.length) {
                     setNet(
@@ -654,18 +697,35 @@ function DemoExercise() {
               Demo complete — no journal records saved
             </h3>
             <p className="mt-2 text-sm">
-              Gross loss: ₹31.50 · total estimated charges:{' '}
-              {money(Number(exit.fees))}.
+              {outcome.label} · gross P/L:{' '}
+              {signedMoney(
+                (Number(exit.price) - plan.entry) * plan.quantity
+              )}{' '}
+              · total estimated charges: {money(Number(exit.fees))}.
             </p>
             <p className="mt-2 text-xl font-bold">
-              Net demo P/L: {net < 0 ? '−' : ''}
-              {money(Math.abs(net))}
+              Net demo P/L: {signedMoney(net)}
             </p>
             <p className="mt-2 text-sm leading-6">
-              The standard example loses ₹45.36 against ₹48.90 planned
-              risk. A larger adverse move or higher costs could exceed ₹50.
-              This result is not performance evidence.
+              Planned risk was {money(plan.risk)}. A larger adverse move or
+              higher costs could exceed ₹50. This result is not performance
+              evidence.
             </p>
+            {exitScenario === 'TARGET' && (
+              <p className="mt-2 text-sm leading-6">
+                The planned net target reward included a ₹5
+                adverse-execution reserve. This fictional exit occurs
+                exactly at target, so that reserve is not deducted again
+                from the observed-price result.
+              </p>
+            )}
+            {exitScenario === 'TIME' && (
+              <p className="mt-2 text-sm leading-6">
+                Time exits count even when neither price level is reached.
+                Charges can consume most of a small favorable move; do not
+                extend the deadline to wait for a larger profit.
+              </p>
+            )}
             <p className="mt-2 text-sm leading-6">
               On a scanner entry day, no further entries are allowed in
               either journal. Log the session and export each journal
@@ -673,7 +733,13 @@ function DemoExercise() {
               nothing to export or delete.
             </p>
             <p className="mt-2 text-sm">
-              Use Reset demo above to practise again, or return to Scan for
+              <a
+                href="#demo-exit-scenario"
+                className="text-teal-300 underline"
+              >
+                Choose another exit scenario
+              </a>
+              , use Reset demo to repeat this one, or return to Scan for
               the Monday checklist.
             </p>
           </div>

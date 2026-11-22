@@ -290,3 +290,204 @@ test('normal app routes retain the shared providers, market status and navigatio
   assert.match(html, /href="\/signals"/);
   pathname = '/market/demo';
 });
+
+test('each scripted exit validates its own price, timestamp, reason and full costs', () => {
+  const demo = logic.createONGCDemo();
+  const rows = [
+    ['STOP', '197.90', '09:58:00', 13.86, -45.36],
+    ['TARGET', '206', '10:02:00', 13.9, 76.1],
+    ['TIME', '201', '10:18:10', 13.87, 1.13],
+  ];
+  for (const [scenario, price, time, fees, net] of rows) {
+    const fields = {
+      price,
+      time,
+      fees: String(fees),
+      reason: scenario,
+      notes: 'Fictional observed outcome only.',
+    };
+    assert.equal(logic.demoExitCharges(demo, scenario), fees);
+    assert.deepEqual(logic.checkDemoExit(demo, fields, scenario), []);
+    assert.equal(
+      Math.round(((+price - 200) * 15 - fees) * 100) / 100,
+      net
+    );
+    assert.ok(
+      logic.checkDemoExit(
+        demo,
+        { ...fields, fees: String(fees - 1) },
+        scenario
+      ).length
+    );
+    assert.ok(
+      logic.checkDemoExit(demo, { ...fields, reason: 'MANUAL' }, scenario)
+        .length
+    );
+    for (const [other, otherPrice, otherTime, otherFees] of rows) {
+      if (other === scenario) continue;
+      assert.ok(
+        logic.checkDemoExit(
+          demo,
+          {
+            ...fields,
+            price: otherPrice,
+            time: otherTime,
+            fees: String(otherFees),
+            reason: other,
+          },
+          scenario
+        ).length
+      );
+    }
+  }
+  assert.match(
+    logic
+      .checkDemoExit(
+        demo,
+        {
+          price: '201',
+          time: '10:18:09',
+          fees: '13.87',
+          reason: 'TIME',
+          notes: 'Too early.',
+        },
+        'TIME'
+      )
+      .join(' '),
+    /30 minutes after entry/
+  );
+  assert.ok(
+    logic.checkDemoExit(
+      demo,
+      {
+        price: '205.99',
+        time: '10:02:00',
+        fees: '13.90',
+        reason: 'TARGET',
+        notes: 'Below target.',
+      },
+      'TARGET'
+    ).length
+  );
+  assert.throws(() => logic.demoExitCharges(demo, 'UNKNOWN'), /supported/);
+});
+
+for (const example of [
+  {
+    scenario: 'TARGET',
+    label: 'Target-hit exit',
+    price: '206',
+    time: '10:02:00',
+    fees: '13.9',
+    net: '+₹76.10',
+  },
+  {
+    scenario: 'TIME',
+    label: '30-minute time exit',
+    price: '201',
+    time: '10:18:10',
+    fees: '13.87',
+    net: '+₹1.13',
+  },
+]) {
+  test(`${example.label} completes with its own costs and no journal or live-data access`, async (t) => {
+    const m = await mountIsolated(t),
+      { el } = m;
+    await field(el, 'Demo exit scenario', example.scenario);
+    assert.match(
+      el.textContent,
+      new RegExp(`Selected exercise: ${example.label}`)
+    );
+    await qualify(el);
+    await click(el, 'Simulate demo entry');
+    await click(el, 'Use demo bid, time and fees');
+    const form = (label) =>
+      [...el.querySelectorAll('label')]
+        .find((l) => l.firstChild?.textContent === label)
+        .querySelector('input');
+    assert.equal(
+      form('Demo observed exit price (₹)').value,
+      example.price
+    );
+    assert.equal(
+      form('Demo observed exit time (IST)').value,
+      example.time
+    );
+    assert.equal(
+      form('Demo total round-trip exit charges (₹)').value,
+      example.fees
+    );
+    assert.ok(
+      el.textContent.includes(`Exercise clock: ${example.time} IST`)
+    );
+    await field(
+      el,
+      'Demo exit source and supervision notes',
+      'Fictional observation for this scenario.'
+    );
+    await field(el, 'Demo exit reason', 'STOP');
+    await click(el, 'Simulate demo exit');
+    assert.match(
+      el.textContent,
+      /Choose the reason matching the observed event/
+    );
+    assert.doesNotMatch(el.textContent, /Demo complete —/);
+    await field(el, 'Demo exit reason', example.scenario);
+    if (example.scenario === 'TIME') {
+      await field(el, 'Demo observed exit time (IST)', '10:18:09');
+      await click(el, 'Simulate demo exit');
+      assert.match(el.textContent, /30 minutes after entry/);
+      await field(el, 'Demo observed exit time (IST)', example.time);
+    }
+    await click(el, 'Simulate demo exit');
+    assert.ok(el.textContent.includes(`Net demo P/L: ${example.net}`));
+    assert.ok(
+      el.textContent.includes(
+        `gross P/L: ${example.scenario === 'TARGET' ? '+₹90.00' : '+₹15.00'}`
+      )
+    );
+    assert.equal(
+      button(el, 'Simulate demo exit').matches(':disabled'),
+      true
+    );
+    m.checkPreserved();
+    await click(el, 'Reset demo');
+    assert.ok(
+      el.textContent.includes(`Selected exercise: ${example.label}`)
+    );
+    assert.doesNotMatch(el.textContent, /Demo complete —/);
+    assert.equal(button(el, 'Simulate demo entry').disabled, true);
+    await field(el, 'Demo exit scenario', 'STOP');
+    assert.match(el.textContent, /Selected exercise: Stop-loss exit/);
+    m.checkPreserved();
+  });
+}
+
+test('switching an open or closed scenario discards only exercise state and requires fresh checks', async (t) => {
+  const m = await mountIsolated(t),
+    { el } = m;
+  await qualify(el);
+  await click(el, 'Simulate demo entry');
+  await click(el, 'Use demo bid, time and fees');
+  await field(el, 'Demo exit scenario', 'TARGET');
+  assert.doesNotMatch(el.textContent, /Demo entry simulated/);
+  assert.equal(button(el, 'Simulate demo entry').disabled, true);
+  assert.match(el.textContent, /1\. Data: pending/);
+  assert.match(el.textContent, /2\. Fees: pending/);
+  await qualify(el);
+  await click(el, 'Simulate demo entry');
+  await click(el, 'Use demo bid, time and fees');
+  await field(el, 'Demo exit reason', 'TARGET');
+  await field(
+    el,
+    'Demo exit source and supervision notes',
+    'Fictional target.'
+  );
+  await click(el, 'Simulate demo exit');
+  assert.match(el.textContent, /Net demo P\/L: \+₹76.10/);
+  await field(el, 'Demo exit scenario', 'TIME');
+  assert.doesNotMatch(el.textContent, /Demo complete —/);
+  assert.doesNotMatch(el.textContent, /Net demo P\/L/);
+  assert.equal(button(el, 'Simulate demo entry').disabled, true);
+  m.checkPreserved();
+});

@@ -306,10 +306,11 @@ export default function MarketPage() {
       <section id="scanner-demo" className={`${card} scroll-mt-6 border-indigo-700`}>
         <h2 className="font-semibold">Practise first: ONGC demo mode</h2>
         <p className="mt-2 text-sm text-slate-300">
-          Walk through fictional data verification, charges, a 3R entry and a
-          stop-loss exit. Demo progress stays in memory; neither journal nor
-          your three-stock study is changed. Use it when you have no open
-          paper position to supervise.
+          Walk through fictional data verification, charges and a 3R entry.
+          Practise stop-loss, target-hit and 30-minute time exits. Demo
+          progress stays in memory; neither journal nor your three-stock
+          study is changed. Use it when you have no open paper position to
+          supervise.
         </p>
         <Link
           href="/market/demo"
