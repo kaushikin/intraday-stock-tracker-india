@@ -206,7 +206,7 @@ test('full demo rejects mismatch and higher fees, rehearses entry/stop exit, and
   const m = await mountIsolated(t),
     { el } = m;
   assert.match(el.textContent, /Demo only · fictional data/);
-  assert.doesNotMatch(el.textContent, /NSE SESSION/);
+  assert.doesNotMatch(el.innerHTML, /aria-label="NSE session"/);
   assert.equal(button(el, 'Simulate demo entry').disabled, true);
   await click(el, 'Capture demo snapshot');
   await click(el, 'Try a volume mismatch');
@@ -286,7 +286,7 @@ test('normal app routes retain the shared providers, market status and navigatio
     React.createElement(Shell, null, React.createElement(Probe))
   );
   assert.match(html, /RELIANCE, TCS, HDFCBANK/);
-  assert.match(html, /NSE SESSION/);
+  assert.match(html, /aria-label="NSE session"/);
   assert.match(html, /href="\/signals"/);
   pathname = '/market/demo';
 });

@@ -33,6 +33,8 @@ The client fetches two shares per candle request, sequentially, with spacing bet
 
 ## Setup and cost filters
 
+The optional [Upstox comparison panel](upstox-comparison.md) displays one share and NIFTY side by side for verification only. It does not feed the scanner, save broker evidence, or modify either journal or the fixed study. Setup and token instructions are included in the panel.
+
 The scanner uses a separately versioned `findScanner3RSetup`, preserving the original Practice function. Both require: long cash shares, completed five-minute EMA20/VWAP pullback, stock and NIFTY 15-minute trend confirmation, warm-up history, unobstructed target and two-bar setup expiry. It does not use the old buy/sell score or Hugging Face sentiment.
 
 Fresh quote checks, actual ask at/above trigger, no chasing beyond 10% of the original stop distance, valid bid/ask and sufficient displayed depth are required. Observed spread stays within 10% of the original stop distance. Spread cost plus the full execution reserve must stay within 25% of original gross stop risk.
@@ -49,3 +51,9 @@ At ₹50 risk and a 3R price target, total costs and reserves may be at most ₹
 - The existing calendar covers regular 2026 NSE sessions and fails closed in unverified years.
 - Published fees include the per-order exchange brokerage ceiling, but not extra orders, delivery/DP, call-and-trade, account charges or special account offers; keep differences in the extra-charge reserve and verify actual costs.
 - A live Monday broker-terminal comparison is still required. Off-hours tests establish connectivity, not a tradable setup, fill quality, profitability or a 70% win rate.
+
+### Workspace navigation
+
+The scanner opens with its limits, four workflow shortcuts and scan controls. Budget inputs are under **Budget and cost assumptions**. **Guide & demo** opens the unchanged Monday checklist, ONGC demo link and detailed cost explanation. The scanner paper journal and its open-position supervision remain mounted and accessible via **Paper journal**. Existing checklist and budget deep links expand their containing sections.
+
+Desktop navigation is in the sidebar. Mobile navigation has Home, Scan, Practice, Trades and **More** for the remaining tools. Home links directly to the 3R scanner and the separate three-stock study; its legacy manual-journal overview remains separate. This presentation change does not change setup rules, entry hours, fees, sizing, journal formats or saved records.

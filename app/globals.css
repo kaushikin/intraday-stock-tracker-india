@@ -3,13 +3,207 @@
 @tailwind utilities;
 
 :root {
-  --background: #09090b;
-  --foreground: #fafafa;
+  --background: #090f1b;
+  --foreground: #edf2fa;
+  color-scheme: dark;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
+  background-image: radial-gradient(
+    ellipse at 80% 0%,
+    #14253a66,
+    transparent 50%
+  );
+  min-height: 100vh;
+  line-height: 1.6;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+[id] {
+  scroll-margin-top: 100px;
+}
+::selection {
+  background: #5eead440;
+}
+:focus-visible {
+  outline: 2px solid #5eead4;
+  outline-offset: 4px;
+}
+input:not([type='checkbox']):not([type='radio']),
+select {
+  min-height: 44px;
+}
+input[type='checkbox'] {
+  accent-color: #5eead4;
+}
+summary {
+  cursor: pointer;
+}
+.desk-sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: 256px;
+  z-index: 40;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 20px 16px;
+  background: #0d1523;
+  border-right: 1px solid #263246;
+}
+.desk-brand-icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  color: #5eead4;
+  background: #163a3d;
+}
+.desk-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: #a6b4c8;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+.desk-nav-link:hover {
+  background: #1b293c;
+  color: #edf2fa;
+}
+.desk-nav-active {
+  color: #8ff3df;
+  background: #173036;
+}
+.desk-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 80px;
+  padding: 14px 32px;
+  border-bottom: 1px solid #263246;
+  background: #0b1320ed;
+  backdrop-filter: blur(16px);
+}
+.desk-mobile-nav {
+  position: fixed;
+  z-index: 50;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding-bottom: env(safe-area-inset-bottom);
+  border-top: 1px solid #304056;
+  background: #101b2cf5;
+  backdrop-filter: blur(16px);
+}
+.desk-skip-link {
+  position: fixed;
+  top: -100px;
+  left: 20px;
+  z-index: 100;
+  border-radius: 10px;
+  padding: 12px;
+  background: #5eead4;
+  color: #091b20;
+}
+.desk-skip-link:focus {
+  top: 12px;
+}
+.scanner-hero {
+  border: 1px solid #2c4456;
+  border-radius: 24px;
+  padding: 28px;
+  background: linear-gradient(120deg, #162b3c, #111c2d 65%, #142c32);
+  box-shadow: 0 16px 50px #00000014;
+}
+.scanner-card {
+  border: 1px solid #28364b;
+  border-radius: 20px;
+  padding: 22px;
+  background: #111c2de6;
+}
+.scanner-primary {
+  border-radius: 12px;
+  padding: 12px 20px;
+  background: #5eead4;
+  color: #092320;
+  font-size: 14px;
+  font-weight: 700;
+  transition: background 0.15s;
+}
+.scanner-primary:hover:not(:disabled) {
+  background: #99f6e4;
+}
+.scanner-primary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.scanner-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #28364b;
+  border-radius: 14px;
+  padding: 14px;
+  background: #111c2d;
+  font-size: 13px;
+  color: #cad5e5;
+}
+.scanner-step:hover {
+  border-color: #4d8e8e;
+  background: #17283a;
+}
+.scanner-step span {
+  display: grid;
+  place-items: center;
+  height: 25px;
+  width: 25px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  background: #1d3b40;
+  color: #82e8d4;
+  font-size: 11px;
+}
+@media (max-width: 639px) {
+  .desk-topbar {
+    min-height: 72px;
+    padding: 12px 16px;
+  }
+  .scanner-hero {
+    border-radius: 20px;
+    padding: 22px 18px;
+  }
+  .scanner-card {
+    padding: 18px;
+  }
+  .scanner-step {
+    padding: 12px 10px;
+    gap: 7px;
+    font-size: 12px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+  }
 }
 
 /* Custom scrollbar for mobile feel */
@@ -36,8 +230,8 @@ body {
   transform: scale(0.985);
 }
 
-input[type="number"]::-webkit-inner-spin-button,
-input[type="number"]::-webkit-outer-spin-button {
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }

@@ -19,7 +19,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark">
-      <body className="font-sans bg-zinc-950 text-white antialiased">
+      <body className="font-sans antialiased">
         <PWARegister />
         <AppShell>{children}</AppShell>
       </body>

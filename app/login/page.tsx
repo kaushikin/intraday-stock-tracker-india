@@ -41,14 +41,14 @@ export default function LoginPage() {
   };
 
   return (
-    <main className="min-h-screen bg-zinc-950 text-white flex items-center justify-center px-4">
-      <div className="w-full max-w-sm rounded-3xl border border-zinc-800 bg-zinc-900/70 p-6 shadow-2xl">
+    <main className="min-h-screen flex items-center justify-center px-4">
+      <div className="scanner-hero w-full max-w-sm">
         <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-500/15 text-emerald-400">
           <Lock className="h-7 w-7" />
         </div>
 
         <h1 className="text-center text-2xl font-semibold">
-          Private Access
+          Welcome to Intraday India
         </h1>
 
         <p className="mt-2 text-center text-sm text-zinc-400">
@@ -61,7 +61,9 @@ export default function LoginPage() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Enter password"
-            className="w-full rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-white outline-none focus:border-emerald-500"
+            aria-label="App password"
+            autoComplete="current-password"
+            className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white"
             autoFocus
           />
 
@@ -74,7 +76,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-2xl bg-white px-4 py-3 font-semibold text-black active:scale-[0.985] disabled:opacity-60"
+            className="scanner-primary w-full"
           >
             {loading ? 'Checking...' : 'Unlock App'}
           </button>

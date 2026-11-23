@@ -25,15 +25,15 @@ import {
 } from '@/lib/scannerFeed';
 import ScannerJournal from '@/components/ScannerJournal';
 import ScannerMondayChecklist from '@/components/ScannerMondayChecklist';
+import UpstoxComparisonPanel from '@/components/UpstoxComparisonPanel';
 import type { NiftyUniverse } from '@/lib/nifty50';
 import { CHARGE_SCHEDULE } from '@/lib/brokerCharges';
 import { displayTime } from '@/components/DataStatusPanel';
 import { runScannerFeed } from '@/lib/candleFeedLock';
-const card = 'rounded-2xl border border-slate-700 bg-slate-900/60 p-4';
+const card = 'scanner-card';
 const input =
   'mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white';
-const button =
-  'rounded-xl bg-teal-700 px-4 py-3 text-sm font-semibold disabled:opacity-40';
+const button = 'scanner-primary';
 const money = (n: number) => `₹${n.toFixed(2)}`;
 type Snapshot = {
   universe: NiftyUniverse;
@@ -63,6 +63,22 @@ export default function MarketPage() {
     [selected, setSelected] = useState('');
   const controller = useRef<AbortController | null>(null),
     mounted = useRef(false);
+  useEffect(() => {
+    // Keep existing checklist and budget deep links usable inside disclosures.
+    const reveal = () => {
+      let target = document.getElementById(window.location.hash.slice(1));
+      const destination = target;
+      while (target) {
+        if (target.tagName === 'DETAILS')
+          (target as HTMLDetailsElement).open = true;
+        target = target.parentElement;
+      }
+      destination?.scrollIntoView?.({ block: 'start' });
+    };
+    reveal();
+    window.addEventListener('hashchange', reveal);
+    return () => window.removeEventListener('hashchange', reveal);
+  }, []);
   const config = useMemo(() => {
     try {
       if (Object.values(values).some((v) => !v.trim()))
@@ -328,131 +344,72 @@ export default function MarketPage() {
   }
   return (
     <div className="space-y-5 pb-12">
-      <header>
-        <p className="text-xs uppercase tracking-widest text-teal-300">
-          Separate 3R paper version
-        </p>
-        <h1 className="mt-2 text-3xl font-bold">Nifty 50 scanner · 3R</h1>
-        <p className="mt-3 text-sm text-slate-300">
-          Find cash-share setups that fit up to ₹50 total planned risk after
-          full charges and execution reserves. New entries use
-          scanner-cash-3r-v2; the three-stock study and old 2R records keep
-          their original rules.
-        </p>
-      </header>
-      <section
-        id="scanner-demo"
-        className={`${card} scroll-mt-6 border-indigo-700`}
-      >
-        <h2 className="font-semibold">Practise first: ONGC demo mode</h2>
-        <p className="mt-2 text-sm text-slate-300">
-          Walk through fictional data verification, charges and a 3R entry.
-          Practise stop-loss, target-hit and 30-minute time exits. Demo progress
-          stays in memory; neither journal nor your three-stock study is
-          changed. Use it when you have no open paper position to supervise.
-        </p>
-        <Link
-          href="/market/demo"
-          className="mt-3 inline-block rounded-xl bg-indigo-700 px-4 py-3 text-sm font-semibold"
-        >
-          Open ONGC practice demo
-        </Link>
-      </section>
-      <section className={card}>
-        <h2 className="font-semibold">Your three-share study stays separate</h2>
-        <p className="mt-2 text-sm text-slate-400">
-          Scanner trades use their own paper journal below and never add to the
-          study’s 100-trade / 50-session results. Continue the fixed study in{' '}
-          <Link href="/signals" className="text-teal-300 underline">
+      <header className="scanner-hero">
+        <div className="flex flex-wrap items-center gap-3 text-[10px] font-semibold uppercase tracking-[.18em] text-teal-200">
+          <span className="rounded-full border border-teal-700/60 bg-teal-900/30 px-3 py-1">
+            Paper trading only
+          </span>
+          <span className="text-slate-400">Separate 3R paper version</span>
+        </div>
+        <h1 className="mt-4 text-2xl font-semibold tracking-tight sm:text-3xl">
+          Nifty 50 scanner · 3R
+        </h1>
+        <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-300">
+          Find a setup. Verify the data and costs. Record your paper trade. Your
+          three-stock study stays in{' '}
+          <Link
+            href="/signals"
+            className="text-teal-200 underline underline-offset-4"
+          >
             Practice
           </Link>
-          . Scanner candidates outside that list are exploratory observations.
+          .
         </p>
-        <p className="mt-2 text-xs text-slate-400">
-          The shortlist uses the entered scenario. Before a paper entry, the
-          scanner journal applies the remaining combined cash and loss limits
-          across both journals. Study shares can only be entered in Practice.
-        </p>
-      </section>
-      <ScannerMondayChecklist hasCandidate={Boolean(selected)} />
-      <section id="scanner-budget" className={`${card} scroll-mt-6`}>
-        <h2 className="font-semibold">Budget and cost assumptions</h2>
-        <div className="mt-3 grid grid-cols-2 gap-3">
-          {Object.keys(DEFAULT_SCAN_CONFIG).map((key) => (
-            <label className="text-xs" key={key}>
-              {
-                {
-                  riskBudget: 'Total risk budget (₹, max 50)',
-                  cash: 'Available cash (₹, max 9500)',
-                  slippage: 'Execution reserve floor (₹, min 5)',
-                  roundingReserve: 'Tax-rounding reserve (₹, min 1)',
-                  extraCharges: 'Extra round-trip charges (₹)',
-                }[key]
-              }
-              <input
-                className={input}
-                type="number"
-                min={key === 'slippage' ? 5 : key === 'roundingReserve' ? 1 : 0}
-                step="0.01"
-                disabled={busy}
-                value={values[key]}
-                onChange={(e) => {
-                  setValues((v) => ({ ...v, [key]: e.target.value }));
-                  setSnapshot(null);
-                }}
-              />
-            </label>
-          ))}
+        <div className="mt-5 flex flex-wrap gap-x-7 gap-y-2 text-xs text-slate-300">
+          <span>
+            <strong className="text-white">₹50</strong> planned risk limit
+          </span>
+          <span>
+            <strong className="text-white">No leverage</strong> · full costs
+          </span>
+          <span>
+            <strong className="text-white">09:45–11:15</strong> entries · IST
+          </span>
         </div>
+      </header>
+      <nav
+        aria-label="Scanner workflow"
+        className="grid grid-cols-2 gap-2 sm:grid-cols-4"
+      >
+        <a href="#scanner-run" className="scanner-step">
+          <span>01</span> Scan stocks
+        </a>
+        <a href="#upstox-comparison" className="scanner-step">
+          <span>02</span> Compare feeds
+        </a>
+        <a href="#scanner-journal" className="scanner-step">
+          <span>03</span> Paper journal
+        </a>
+        <a
+          href="#scanner-guide"
+          className="scanner-step"
+          onClick={() => {
+            const guide = document.getElementById('scanner-guide');
+            if (guide?.tagName === 'DETAILS')
+              (guide as HTMLDetailsElement).open = true;
+          }}
+        >
+          <span>?</span> Guide &amp; demo
+        </a>
+      </nav>
+      <section id="scanner-run" className={card}>
+        <h2 className="text-lg font-semibold">Run a scan</h2>
         {config.error && (
-          <p role="alert" className="mt-3 text-amber-200">
-            {config.error}
+          <p role="alert" className="mt-2 text-sm text-amber-200">
+            Review budget settings: {config.error}
           </p>
         )}
-        <p className="mt-3 text-xs text-slate-400">
-          One buy and one sell order, no leverage. Standard{' '}
-          <a
-            href={CHARGE_SCHEDULE.source}
-            target="_blank"
-            rel="noreferrer"
-            className="text-teal-300 underline"
-          >
-            Angel One published charges
-          </a>{' '}
-          checked {CHARGE_SCHEDULE.reviewedAt}; your account costs remain
-          unverified. Keep realistic reserves. A valid result may contain zero
-          candidates.
-        </p>
-      </section>
-      <section className={card}>
-        <h2 className="font-semibold">Cost headroom</h2>
-        <p className="mt-2 text-sm text-slate-300">
-          At a 3R price target, this budget permits total costs and reserves of
-          at most {money(((config.value?.riskBudget || 0) * 1.8) / 4)} to meet
-          net reward/risk 1.2 when the whole risk budget can be used. Whole
-          shares, a later ask and the chart can reduce that allowance.
-        </p>
-        <p className="mt-2 text-xs text-slate-400">
-          Each quantity uses the largest of your execution reserve, ₹5, two
-          spreads × quantity and two ticks × quantity. Tax rounding stays at
-          least ₹1. Purchase value is capped at ₹5,000; cash and all costs must
-          fit ₹9,500. Costs stay inside the ₹50 planned-risk cap. Targets remain
-          3× the original chart stop distance; no chasing or moving the target.
-        </p>
-        <p className="mt-2 text-xs text-amber-200">
-          One 3R entry per day across the shared account. No leverage or broker
-          orders. Zero candidates is valid. Refresh other open app tabs before
-          saving; old scanner versions cannot write the new backup format.
-        </p>
-        <Link
-          href="/cash-plan"
-          className="mt-3 inline-block text-sm text-teal-300 underline"
-        >
-          Read the active 3R rules and cost examples
-        </Link>
-      </section>
-      <section id="scanner-run" className={`${card} scroll-mt-6`}>
-        <p className="text-sm">
+        <p className="mt-1 text-xs text-teal-200">
           {now
             ? getIndianMarketStatus(now).replaceAll('_', ' ')
             : 'Checking session…'}{' '}
@@ -464,6 +421,12 @@ export default function MarketPage() {
           candidate before reviewing it: quotes expire after 30 seconds, and
           results update as they age.
         </p>
+        {now && !isFreshSignalWindowOpenIST(now) && (
+          <p className="mt-3 rounded-xl border border-amber-800/50 bg-amber-950/20 px-3 py-2 text-xs text-amber-200">
+            New paper entries are closed. You can still check feeds and
+            supervise or exit an existing position.
+          </p>
+        )}
         <div className="mt-4 flex flex-wrap gap-3">
           <button
             className={button}
@@ -539,6 +502,61 @@ export default function MarketPage() {
           </p>
         )}
       </section>
+      <details id="scanner-budget" className={card}>
+        <summary className="text-sm font-semibold">
+          Budget and cost assumptions{' '}
+          <span className="mt-1 block font-normal text-slate-400">
+            ₹{values.riskBudget} total risk · ₹{values.cash} available cash ·
+            review or adjust
+          </span>
+        </summary>
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          {Object.keys(DEFAULT_SCAN_CONFIG).map((key) => (
+            <label className="text-xs" key={key}>
+              {
+                {
+                  riskBudget: 'Total risk budget (₹, max 50)',
+                  cash: 'Available cash (₹, max 9500)',
+                  slippage: 'Execution reserve floor (₹, min 5)',
+                  roundingReserve: 'Tax-rounding reserve (₹, min 1)',
+                  extraCharges: 'Extra round-trip charges (₹)',
+                }[key]
+              }
+              <input
+                className={input}
+                type="number"
+                min={key === 'slippage' ? 5 : key === 'roundingReserve' ? 1 : 0}
+                step="0.01"
+                disabled={busy}
+                value={values[key]}
+                onChange={(e) => {
+                  setValues((v) => ({ ...v, [key]: e.target.value }));
+                  setSnapshot(null);
+                }}
+              />
+            </label>
+          ))}
+        </div>
+        {config.error && (
+          <p role="alert" className="mt-3 text-amber-200">
+            {config.error}
+          </p>
+        )}
+        <p className="mt-3 text-xs text-slate-400">
+          One buy and one sell order, no leverage. Standard{' '}
+          <a
+            href={CHARGE_SCHEDULE.source}
+            target="_blank"
+            rel="noreferrer"
+            className="text-teal-300 underline"
+          >
+            Angel One published charges
+          </a>{' '}
+          checked {CHARGE_SCHEDULE.reviewedAt}; your account costs remain
+          unverified. Keep realistic reserves. A valid result may contain zero
+          candidates.
+        </p>
+      </details>
       <section className="space-y-3" aria-label="Scanner shortlist">
         <h2 className="text-lg font-semibold">
           Shortlist · {shortlist.length}
@@ -599,6 +617,7 @@ export default function MarketPage() {
           </div>
         </details>
       )}
+      <UpstoxComparisonPanel selected={selected} scanBusy={busy} now={now} />
       <ScannerJournal
         selected={selected}
         context={
@@ -608,6 +627,83 @@ export default function MarketPage() {
         scanBusy={busy}
         recheck={() => void run(selected)}
       />
+      <details id="scanner-guide" className={card}>
+        <summary className="font-semibold">
+          Session guide &amp; ONGC practice demo
+        </summary>
+        <div className="mt-5 space-y-5">
+          <section
+            id="scanner-demo"
+            className={`${card} scroll-mt-6 border-indigo-700`}
+          >
+            <h2 className="font-semibold">Practise first: ONGC demo mode</h2>
+            <p className="mt-2 text-sm text-slate-300">
+              Walk through fictional data verification, charges and a 3R entry.
+              Practise stop-loss, target-hit and 30-minute time exits. Demo
+              progress stays in memory; neither journal nor your three-stock
+              study is changed. Use it when you have no open paper position to
+              supervise.
+            </p>
+            <Link
+              href="/market/demo"
+              className="mt-3 inline-block rounded-xl bg-indigo-700 px-4 py-3 text-sm font-semibold"
+            >
+              Open ONGC practice demo
+            </Link>
+          </section>
+          <section className={card}>
+            <h2 className="font-semibold">
+              Your three-share study stays separate
+            </h2>
+            <p className="mt-2 text-sm text-slate-400">
+              Scanner trades use their own paper journal below and never add to
+              the study’s 100-trade / 50-session results. Continue the fixed
+              study in{' '}
+              <Link href="/signals" className="text-teal-300 underline">
+                Practice
+              </Link>
+              . Scanner candidates outside that list are exploratory
+              observations.
+            </p>
+            <p className="mt-2 text-xs text-slate-400">
+              The shortlist uses the entered scenario. Before a paper entry, the
+              scanner journal applies the remaining combined cash and loss
+              limits across both journals. Study shares can only be entered in
+              Practice.
+            </p>
+          </section>
+          <ScannerMondayChecklist hasCandidate={Boolean(selected)} />
+          <section className={card}>
+            <h2 className="font-semibold">Cost headroom</h2>
+            <p className="mt-2 text-sm text-slate-300">
+              At a 3R price target, this budget permits total costs and reserves
+              of at most {money(((config.value?.riskBudget || 0) * 1.8) / 4)} to
+              meet net reward/risk 1.2 when the whole risk budget can be used.
+              Whole shares, a later ask and the chart can reduce that allowance.
+            </p>
+            <p className="mt-2 text-xs text-slate-400">
+              Each quantity uses the largest of your execution reserve, ₹5, two
+              spreads × quantity and two ticks × quantity. Tax rounding stays at
+              least ₹1. Purchase value is capped at ₹5,000; cash and all costs
+              must fit ₹9,500. Costs stay inside the ₹50 planned-risk cap.
+              Targets remain 3× the original chart stop distance; no chasing or
+              moving the target.
+            </p>
+            <p className="mt-2 text-xs text-amber-200">
+              One 3R entry per day across the shared account. No leverage or
+              broker orders. Zero candidates is valid. Refresh other open app
+              tabs before saving; old scanner versions cannot write the new
+              backup format.
+            </p>
+            <Link
+              href="/cash-plan"
+              className="mt-3 inline-block text-sm text-teal-300 underline"
+            >
+              Read the active 3R rules and cost examples
+            </Link>
+          </section>
+        </div>
+      </details>
       <p className="text-xs text-slate-500">
         Market data and membership failures are shown explicitly. No bullish or
         bearish score is substituted for the fixed setup. Exported scans remain
