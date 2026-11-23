@@ -27,7 +27,7 @@ const risk = (overrides = {}) => ({
   feeFloor: { stop: 55, target: 55 },
   ...overrides,
 });
-function runtime() {
+function runtime(fetcher) {
   let now = f.now.getTime(),
     providerError = false,
     pushError = false,
@@ -90,9 +90,14 @@ function runtime() {
     },
     fetcher: async (url, options) => {
       requests.push({ url, options });
+      if (fetcher) return fetcher(url, options);
       return {
         ok: true,
-        json: async () => ({ scheduleId: 'intraday-india-gold-petal-v1' }),
+        status: 200,
+        json: async () =>
+          options.method === 'GET'
+            ? []
+            : { scheduleId: 'intraday-india-gold-petal-v1' },
       };
     },
   });
@@ -180,10 +185,15 @@ test('closed-page scheduler uses its own secret, fixed destination, zero retries
   assert.equal(await r.api.authenticate('Bearer invalid'), false);
   await assert.rejects(r.api.connect('x'.repeat(30), false));
   await r.api.connect('x'.repeat(30), true);
-  const request = r.requests[0];
+  assert.equal(r.requests[0].options.method, 'GET');
+  assert.equal(
+    r.requests[0].url,
+    'https://qstash-eu-central-1.upstash.io/v2/schedules',
+  );
+  const request = r.requests[1];
   assert.equal(
     request.url,
-    'https://qstash.upstash.io/v2/schedules/' +
+    'https://qstash-eu-central-1.upstash.io/v2/schedules/' +
       ALERT_ORIGIN +
       '/api/alerts/gold-petal/tick',
   );
@@ -197,6 +207,108 @@ test('closed-page scheduler uses its own secret, fixed destination, zero retries
   );
   assert.ok(!JSON.stringify(await r.api.status()).includes('privateKey'));
   assert.ok(![...r.data.values()].some((v) => v.raw.includes('x'.repeat(30))));
+});
+test('failed QStash token check does not create a schedule, arm a watch, fetch prices or expose provider text', async () => {
+  const secret = 'private-token-' + 'x'.repeat(30);
+  const r = runtime(async () => ({
+    ok: false,
+    status: 401,
+    json: async () => ({ error: secret }),
+  }));
+  await assert.rejects(r.api.connect(secret, true), (error) => {
+    assert.equal(error.code, 'authentication');
+    assert.equal(error.stage, 'token-check');
+    assert.equal(error.httpStatus, 401);
+    assert.ok(!error.message.includes(secret));
+    return true;
+  });
+  assert.equal(r.requests.length, 1);
+  assert.equal(r.requests[0].options.method, 'GET');
+  const status = await r.api.status();
+  assert.equal(status.schedulerConnected, false);
+  assert.equal(status.watch, null);
+  assert.equal(status.setup.code, 'authentication');
+  assert.equal(status.setup.httpStatus, 401);
+  assert.equal(r.calls(), 0);
+  assert.equal(r.pushes.length, 0);
+  assert.ok(!JSON.stringify(status).includes(secret));
+  assert.ok(![...r.data.values()].some((v) => v.raw.includes(secret)));
+});
+test('schedule rejection is separate from token rejection; retries reuse the same ID and do not change an existing watch', async () => {
+  let fail = true;
+  const secret = 'x'.repeat(30);
+  const r = runtime(async (url, options) =>
+    options.method === 'GET'
+      ? { ok: true, status: 200, json: async () => [] }
+      : fail
+        ? {
+            ok: false,
+            status: 400,
+            json: async () => ({ error: 'schedule limit exceeded ' + secret }),
+          }
+        : {
+            ok: true,
+            status: 200,
+            json: async () => ({ scheduleId: 'intraday-india-gold-petal-v1' }),
+          },
+  );
+  await assert.rejects(r.api.connect(secret, true), {
+    code: 'schedule-limit',
+    stage: 'schedule',
+    httpStatus: 400,
+  });
+  assert.equal((await r.api.status()).schedulerConnected, false);
+  fail = false;
+  await r.api.connect('QSTASH_TOKEN="' + secret + '"', true);
+  const w = await r.api.arm(risk(), subscription, true);
+  await r.api.confirm(w.revision);
+  const before = r.data.get('watch').raw;
+  fail = true;
+  await assert.rejects(r.api.connect(secret, true));
+  assert.equal(r.data.get('watch').raw, before);
+  assert.equal((await r.api.status()).schedulerConnected, true);
+  fail = false;
+  await r.api.connect(secret, true);
+  assert.equal((await r.api.status()).setup.code, 'connected');
+  assert.equal(r.data.get('watch').raw, before);
+  assert.ok(
+    r.requests
+      .filter((v) => v.options.method === 'POST')
+      .every(
+        (v) =>
+          v.options.headers['Upstash-Schedule-Id'] ===
+          'intraday-india-gold-petal-v1',
+      ),
+  );
+});
+test('setup API exposes only the classified failure and safe status fields', async (t) => {
+  const server = require('../lib/goldPetalAlertServer.ts');
+  const { QStashSetupError } = require('../lib/qstashSetup.ts');
+  const original = server.petalAlerts.connect;
+  server.petalAlerts.connect = async () => {
+    throw new QStashSetupError('permission', 'schedule', 403);
+  };
+  t.after(() => {
+    server.petalAlerts.connect = original;
+  });
+  const { POST } = require('../app/api/alerts/gold-petal/route.ts');
+  const result = await POST(
+    new Request(ALERT_ORIGIN + '/api/alerts/gold-petal', {
+      method: 'POST',
+      headers: { Origin: ALERT_ORIGIN },
+      body: JSON.stringify({
+        action: 'connect',
+        token: 'private-value',
+        freeConfirmed: true,
+      }),
+    }),
+  );
+  assert.equal(result.status, 400);
+  const body = await result.json();
+  assert.equal(body.setup.code, 'permission');
+  assert.equal(body.setup.httpStatus, 403);
+  assert.match(body.error, /regular QSTASH_TOKEN/);
+  assert.ok(!JSON.stringify(body).includes('private-value'));
 });
 test('test confirmation is required; a server tick without a page sends once per completed candle and never creates a trade', async () => {
   const r = runtime();

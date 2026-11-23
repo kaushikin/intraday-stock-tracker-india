@@ -59,7 +59,7 @@ export async function alertAction(body: object) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
     cache: 'no-store',
-    signal: AbortSignal.timeout(25000),
+    signal: AbortSignal.timeout(40000),
   });
   const result = await response.json();
   if (!response.ok) throw new Error(result.error || 'Alert request failed.');

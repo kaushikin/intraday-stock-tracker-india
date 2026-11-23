@@ -18,6 +18,13 @@ import {
 import { loadPetalFeed } from './goldPetalServer';
 import { petalSessionProblem } from './goldPetalMarket';
 import { istDateKey } from './marketHours';
+import {
+  normalizeQStashToken,
+  qstashRequest,
+  QStashSetupError,
+  type SetupDiagnostic,
+  type SetupStage,
+} from './qstashSetup';
 
 export const ALERT_ORIGIN = 'https://intraday-stock-tracker-india.vercel.app';
 export const ALERT_TICK_PATH = '/api/alerts/gold-petal/tick';
@@ -137,7 +144,7 @@ export function createPetalAlerts(overrides: Partial<Runtime> = {}) {
     });
   }
   async function status() {
-    const [keys, schedule, watch, last, heartbeat, closedTest] =
+    const [keys, schedule, watch, last, heartbeat, closedTest, setup] =
       await Promise.all([
         secrets(),
         get<{ id: string }>('schedule'),
@@ -147,6 +154,7 @@ export function createPetalAlerts(overrides: Partial<Runtime> = {}) {
         ),
         get<{ at: string }>('heartbeat'),
         get<ClosedPageTest>('closed-test'),
+        get<SetupDiagnostic>('setup-last'),
       ]);
     const active =
       !!watch &&
@@ -155,6 +163,7 @@ export function createPetalAlerts(overrides: Partial<Runtime> = {}) {
     return {
       publicKey: keys.publicKey,
       schedulerConnected: !!schedule,
+      setup,
       heartbeat,
       watch: active
         ? {
@@ -190,48 +199,74 @@ export function createPetalAlerts(overrides: Partial<Runtime> = {}) {
     };
   }
   async function connect(token: string, freeConfirmed: boolean) {
-    if (
-      freeConfirmed !== true ||
-      typeof token !== 'string' ||
-      token.length < 20 ||
-      token.length > 4000 ||
-      /\s/.test(token)
-    )
-      throw new Error(
-        'Select QStash Free and enter its token in this private form.',
-      );
-    const keys = await secrets();
-    // Idempotent schedule ID. No paid plan is selected and the token is not stored.
-    const response = await rt.fetcher(
-      'https://qstash.upstash.io/v2/schedules/' +
-        ALERT_ORIGIN +
-        ALERT_TICK_PATH,
-      {
-        method: 'POST',
-        redirect: 'error',
-        signal: AbortSignal.timeout(10000),
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          'Upstash-Cron': '* 12-16 * * 1-5',
-          'Upstash-Schedule-Id': SCHEDULE_ID,
-          'Upstash-Method': 'POST',
-          'Upstash-Retries': '0',
-          'Upstash-Forward-Authorization': `Bearer ${keys.callback}`,
+    let stage: SetupStage = 'input';
+    try {
+      if (freeConfirmed !== true)
+        throw new QStashSetupError('free-unconfirmed', stage);
+      const value = normalizeQStashToken(token);
+      stage = 'token-check';
+      const schedules = await qstashRequest(
+        rt.fetcher,
+        '/v2/schedules',
+        {
+          method: 'GET',
+          headers: { Authorization: `Bearer ${value}` },
         },
-        body: '{}',
-      },
-    );
-    if (!response.ok)
-      throw new Error(
-        'Scheduler connection failed. Check the QStash token and Free plan; no watch was enabled.',
+        stage,
       );
-    const result = await response.json();
-    if (result.scheduleId !== SCHEDULE_ID)
-      throw new Error(
-        'Scheduler response was not recognised. Check the QStash console.',
+      if (!Array.isArray(schedules))
+        throw new QStashSetupError('response', stage, 200);
+      stage = 'storage';
+      const keys = await secrets();
+      stage = 'schedule';
+      // Idempotent schedule ID. No paid plan is selected and the token is not stored.
+      const result = await qstashRequest(
+        rt.fetcher,
+        '/v2/schedules/' + ALERT_ORIGIN + ALERT_TICK_PATH,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${value}`,
+            'Content-Type': 'application/json',
+            'Upstash-Cron': '* 12-16 * * 1-5',
+            'Upstash-Schedule-Id': SCHEDULE_ID,
+            'Upstash-Method': 'POST',
+            'Upstash-Retries': '0',
+            'Upstash-Forward-Authorization': `Bearer ${keys.callback}`,
+          },
+          body: '{}',
+        },
+        stage,
       );
-    await set('schedule', { id: SCHEDULE_ID }, 366 * 86400);
+      if (
+        !result ||
+        typeof result !== 'object' ||
+        !('scheduleId' in result) ||
+        result.scheduleId !== SCHEDULE_ID
+      )
+        throw new QStashSetupError('response', stage, 200);
+      stage = 'storage';
+      await set('schedule', { id: SCHEDULE_ID }, 366 * 86400);
+      await set('setup-last', {
+        at: rt.now().toISOString(),
+        code: 'connected',
+        stage: 'schedule',
+        httpStatus: 200,
+        message:
+          'Scheduler connected. Enable and confirm a test notification to start today’s watch.',
+      } satisfies SetupDiagnostic);
+    } catch (e) {
+      const error =
+        e instanceof QStashSetupError
+          ? e
+          : new QStashSetupError('storage', stage);
+      try {
+        await set('setup-last', error.diagnostic(rt.now().toISOString()));
+      } catch {
+        /* The safe response still reaches the user if storage is unavailable. */
+      }
+      throw error;
+    }
   }
   async function arm(
     riskValue: unknown,

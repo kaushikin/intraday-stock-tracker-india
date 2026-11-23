@@ -56,7 +56,7 @@ async function settled(el) {
     el.textContent,
   );
 }
-async function mount(t, permission = 'granted') {
+async function mount(t, permission = 'granted', connected = true) {
   localStorage.clear();
   const records = {
     paper_trading_book_v1: JSON.stringify({
@@ -86,7 +86,7 @@ async function mount(t, permission = 'granted') {
     actions = [];
   const state = {
     publicKey: webpush.generateVAPIDKeys().publicKey,
-    schedulerConnected: true,
+    schedulerConnected: connected,
     watch: null,
     heartbeat: { at: f.now.toISOString() },
   };
@@ -94,6 +94,19 @@ async function mount(t, permission = 'granted') {
     if (options?.method === 'POST') {
       const body = JSON.parse(options.body);
       actions.push(body);
+      if (body.action === 'connect') {
+        state.setup = {
+          at: f.now.toISOString(),
+          code: 'authentication',
+          stage: 'token-check',
+          httpStatus: 401,
+          message: 'QStash did not accept this token in the EU region.',
+        };
+        return {
+          ok: false,
+          json: async () => ({ error: state.setup.message }),
+        };
+      }
       if (body.action === 'arm') {
         state.watch = {
           revision: 'test-revision',
@@ -162,6 +175,39 @@ async function mount(t, permission = 'granted') {
   );
   return { el, records, writes, actions, state, root };
 }
+test('failed scheduler connection clears the private field, keeps the error after refresh and leaves every journal untouched', async (t) => {
+  const { el, records, writes, actions, state } = await mount(
+    t,
+    'granted',
+    false,
+  );
+  const secret = 'QSTASH_TOKEN="private-token-only-for-test"';
+  await act(async () => {
+    Simulate.change(el.querySelector('input[type=password]'), {
+      target: { value: secret },
+    });
+    Simulate.change(el.querySelector('input[type=checkbox]'), {
+      target: { checked: true },
+    });
+  });
+  await act(async () => button(el, 'Connect free scheduler').click());
+  for (let i = 0; i < 100 && !button(el, 'Connect free scheduler'); i++)
+    await act(async () => new Promise((r) => setTimeout(r, 10)));
+  assert.equal(el.querySelector('input[type=password]').value, '');
+  assert.equal(actions.length, 1);
+  assert.equal(actions[0].action, 'connect');
+  assert.equal(actions[0].token, secret);
+  assert.equal(state.watch, null);
+  assert.match(el.textContent, /QStash HTTP 401/);
+  assert.match(el.textContent, /Setup needed/);
+  assert.ok(button(el, 'Enable today’s alerts + send test').disabled);
+  await act(async () => window.dispatchEvent(new Event('focus')));
+  assert.match(el.textContent, /QStash did not accept this token/);
+  assert.ok(!el.textContent.includes(secret));
+  assert.deepEqual(writes, []);
+  for (const [key, value] of Object.entries(records))
+    assert.equal(localStorage.getItem(key), value, key);
+});
 test('enable, confirm delivered test and invalidate changed risk leave both stock books, pilot and study intact', async (t) => {
   const { el, records, writes, actions, state } = await mount(t);
   assert.ok(button(el, 'Enable today’s alerts + send test').disabled);

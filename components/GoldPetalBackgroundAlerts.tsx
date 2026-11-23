@@ -8,10 +8,12 @@ import {
   readAlertRisk,
 } from '@/lib/goldPetalAlertClient';
 import { PETAL_ALERT_LOCAL_KEY } from '@/lib/goldPetalAlerts';
+import type { SetupDiagnostic } from '@/lib/qstashSetup';
 
 type Status = {
   publicKey: string;
   schedulerConnected: boolean;
+  setup?: SetupDiagnostic;
   heartbeat?: { at: string };
   watch?: {
     revision: string;
@@ -104,6 +106,7 @@ export default function GoldPetalBackgroundAlerts({
       await action();
       await load();
     } catch (e) {
+      await load();
       setError(e instanceof Error ? e.message : 'Alert setup failed.');
     } finally {
       setBusy(false);
@@ -225,6 +228,17 @@ export default function GoldPetalBackgroundAlerts({
           Last server contact:{' '}
           {status?.heartbeat ? time(status.heartbeat.at) : 'Not received yet'}
         </p>
+        {status?.setup && status.setup.code !== 'connected' && (
+          <p className="mt-2 text-sm text-amber-200">
+            Last connection attempt: {status.setup.message}
+            <span className="mt-1 block text-xs text-slate-400">
+              {time(status.setup.at)} · {status.setup.stage}
+              {status.setup.httpStatus
+                ? ` · QStash HTTP ${status.setup.httpStatus}`
+                : ''}
+            </span>
+          </p>
+        )}
         {status?.last && (
           <p className="mt-2 text-xs text-slate-300">
             {time(status.last.at)} · {status.last.message}
@@ -284,9 +298,10 @@ export default function GoldPetalBackgroundAlerts({
             </li>
             <li>
               Copy <strong>QSTASH_TOKEN</strong> from the EU Quickstart section
-              into the private field below. Use the token value only, without
-              quotes. Do not use a Redis token or either signing key. Never
-              paste it in chat.
+              into the private field below. The token value or its single
+              QSTASH_TOKEN= line both work, including surrounding quotes. Do not
+              copy the whole Quickstart block, a Redis token or either signing
+              key. Never paste it in chat.
             </li>
           </ol>
           <p className="mt-3 text-xs text-slate-400">
@@ -315,7 +330,7 @@ export default function GoldPetalBackgroundAlerts({
             I selected QStash Free and checked that no paid upgrade is required.
           </label>
           <button
-            className="scanner-secondary mt-3"
+            className="mt-3 rounded-xl border border-teal-300/50 bg-teal-300 px-4 py-3 font-semibold text-slate-950 hover:bg-teal-200 disabled:cursor-not-allowed disabled:opacity-40"
             disabled={busy || !free || !token.trim() || !status}
             onClick={() =>
               void run(async () => {
@@ -329,7 +344,7 @@ export default function GoldPetalBackgroundAlerts({
               })
             }
           >
-            Connect free scheduler
+            {busy ? 'Checking QStash…' : 'Connect free scheduler'}
           </button>
           <p className="mt-3 text-xs text-slate-400">
             To remove the schedule later, delete{' '}

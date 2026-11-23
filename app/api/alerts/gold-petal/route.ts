@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { petalAlerts, ALERT_ORIGIN } from '@/lib/goldPetalAlertServer';
+import { QStashSetupError } from '@/lib/qstashSetup';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 30;
+export const maxDuration = 45;
 const json = (body: object, status = 200) =>
   NextResponse.json(body, {
     status,
@@ -66,6 +67,11 @@ export async function POST(req: NextRequest) {
     }
     return json({ success: true });
   } catch (e) {
+    if (e instanceof QStashSetupError)
+      return json(
+        { error: e.message, setup: e.diagnostic(new Date().toISOString()) },
+        400,
+      );
     // Only our user-facing validation errors; never return provider bodies/tokens.
     const message =
       e instanceof Error &&
