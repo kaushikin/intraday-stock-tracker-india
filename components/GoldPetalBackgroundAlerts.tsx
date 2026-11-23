@@ -9,6 +9,7 @@ import {
 } from '@/lib/goldPetalAlertClient';
 import { PETAL_ALERT_LOCAL_KEY } from '@/lib/goldPetalAlerts';
 import type { SetupDiagnostic } from '@/lib/qstashSetup';
+import GoldPetalNotificationChecklist from '@/components/GoldPetalNotificationChecklist';
 
 type Status = {
   publicKey: string;
@@ -211,7 +212,11 @@ export default function GoldPetalBackgroundAlerts({
         costs and your last confirmed ₹250 daily allowance. Open the app to
         verify data, charges and current risk before entering.
       </p>
-      <div className="rounded-xl bg-slate-950/50 p-4 text-sm" role="status">
+      <div
+        id="gold-petal-alert-status"
+        className="scroll-mt-6 rounded-xl bg-slate-950/50 p-4 text-sm"
+        role="status"
+      >
         {!status
           ? 'Alert status unavailable · do not rely on notifications.'
           : !status.schedulerConnected
@@ -279,6 +284,7 @@ export default function GoldPetalBackgroundAlerts({
           Closed-page test: {status.closedTest.message}
         </p>
       )}
+      <GoldPetalNotificationChecklist />
       {!status?.schedulerConnected && (
         <details className="rounded-xl border border-slate-700 p-4">
           <summary className="cursor-pointer text-sm text-teal-200">
@@ -361,7 +367,10 @@ export default function GoldPetalBackgroundAlerts({
           </p>
         </details>
       )}
-      <label className="flex gap-2 text-sm text-slate-300">
+      <label
+        id="gold-petal-alert-controls"
+        className="scroll-mt-6 flex gap-2 text-sm text-slate-300"
+      >
         <input
           type="checkbox"
           checked={acknowledged}
@@ -438,17 +447,6 @@ export default function GoldPetalBackgroundAlerts({
           Check alert status
         </button>
       </div>
-      <p className="text-xs leading-relaxed text-slate-400">
-        To test with the page closed: confirm the first notification, then
-        choose “Send closed-page test in 1–2 minutes” between 18:00 and 21:27
-        IST on a trading day. Wait for “Test queued”, close all app tabs and
-        leave the browser running for this first test. A separate “closed-page
-        TEST” notification should arrive. This tests the scheduler and
-        notification delivery without fetching market data or creating a trade.
-        Candidate scans pause briefly during this test and resume afterward. If
-        no test arrives within three minutes, reopen the panel and check its
-        status; do not assume it passed.
-      </p>
       <p className="text-xs leading-relaxed text-slate-400">
         Enable afresh each day; the watch expires at 21:30 IST. Checks run about
         once a minute through the shared Angel limits. One alert per qualifying

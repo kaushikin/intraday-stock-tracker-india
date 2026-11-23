@@ -341,7 +341,7 @@ export default function GoldPetalPage() {
         </p>
       )}
 
-      <section className="scanner-card space-y-4">
+      <section id="gold-petal-daily-risk" className="scanner-card scroll-mt-6 space-y-4">
         <h2 className="font-semibold">1 · Confirm today’s total risk</h2>
         <p className="text-sm text-slate-300">
           Both stock paper journals are read here without changing them. Today’s
