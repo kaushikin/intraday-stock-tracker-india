@@ -276,6 +276,8 @@ test('denied notification permission cannot arm a watch or write paper records',
   );
   await settled(el);
   assert.match(el.textContent, /Notifications are blocked/);
+  await act(async () => window.dispatchEvent(new Event('focus')));
+  assert.match(el.textContent, /Notifications are blocked/);
   assert.deepEqual(actions, []);
   assert.deepEqual(writes, []);
 });

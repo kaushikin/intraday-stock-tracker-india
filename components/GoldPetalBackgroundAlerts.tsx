@@ -42,6 +42,7 @@ export default function GoldPetalBackgroundAlerts({
 }) {
   const [status, setStatus] = useState<Status | null>(null),
     [error, setError] = useState(''),
+    [statusError, setStatusError] = useState(''),
     [busy, setBusy] = useState(false),
     [token, setToken] = useState(''),
     [free, setFree] = useState(false),
@@ -57,10 +58,12 @@ export default function GoldPetalBackgroundAlerts({
       if (!response.ok || typeof result.publicKey !== 'string')
         throw new Error(result.error || 'Alert status unavailable.');
       setStatus(result);
-      setError('');
+      setStatusError('');
     } catch (e) {
       setStatus(null);
-      setError(e instanceof Error ? e.message : 'Alert status unavailable.');
+      setStatusError(
+        e instanceof Error ? e.message : 'Alert status unavailable.',
+      );
     }
   }
   useEffect(() => {
@@ -256,6 +259,11 @@ export default function GoldPetalBackgroundAlerts({
           No recent scheduler contact. Before closing the page during
           18:00–21:30 IST, wait for a recent server check. Outside scheduled
           hours, no checks are expected.
+        </p>
+      )}
+      {statusError && (
+        <p role="alert" className="text-sm text-amber-200">
+          {statusError}
         </p>
       )}
       {(error || note) && (
