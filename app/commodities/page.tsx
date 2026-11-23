@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { RefreshCw, Droplets, Gem, Layers3 } from 'lucide-react';
 import AngelBudgetPanel from '@/components/AngelBudgetPanel';
+import CommodityValidationPanel from '@/components/CommodityValidationPanel';
 import {
   COMMODITY_WATCH,
   commodityQuoteStatus,
@@ -104,6 +105,7 @@ export default function CommoditiesPage() {
           orders or paper entries are created here.
         </p>
       </section>
+      <CommodityValidationPanel />
       <section className="scanner-card">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
@@ -241,8 +243,8 @@ export default function CommoditiesPage() {
           We select the nearest listed expiry after today; expiry-day contracts
           are skipped. The selected contract may change on rollover and is not
           necessarily the most active. MCX sessions differ from NSE sessions. A
-          quoted price is not the cost or margin for one lot. No ₹50
-          affordability or entry test is performed.
+          quoted price is not the cost or margin for one lot. The feasibility
+          review above blocks buy alerts; a fresh quote cannot override it.
         </p>
         <Link
           href="/market"
