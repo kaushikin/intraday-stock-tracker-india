@@ -7,6 +7,7 @@ import AlertToasts from './AlertToasts';
 import BottomNav from './BottomNav';
 import Disclaimer from './Disclaimer';
 import MarketStatus from './MarketStatus';
+import GoldPetalAlertGuard from './GoldPetalAlertGuard';
 
 export default function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -27,6 +28,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         }
       >
         <AlertToasts />
+        <GoldPetalAlertGuard />
         <a href="#workspace-content" className="desk-skip-link">
           Skip to content
         </a>

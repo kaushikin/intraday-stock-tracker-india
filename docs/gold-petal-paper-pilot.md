@@ -44,6 +44,8 @@ The user explicitly records each exit. App-priced exits require a fresh matching
 
 ## Evidence plan
 
+An optional [background candidate watch](gold-petal-background-alerts.md) is now available separately from the on-screen exit assistant. It requires QStash Free setup, browser push permission, a confirmed test notification and a daily risk snapshot. It writes only separate alert metadata (`gold_petal_alert_watch_v1` and separate Redis keys), never either stock journal or pilot trades. Closing the page can still stop exit monitoring after an entry.
+
 Review operational problems after five sessions, keeping strategy thresholds fixed. Gather at least 50 sessions and 100 closed paper trades before evaluating performance; at one trade per day this necessarily takes at least 100 trading days. Calendar/specification reviews are required across year boundaries. Evaluate net expectancy, loss distribution, slippage, missed opportunities and manual/late exits as well as win rate. Do not infer a 70% win probability from software tests or the separate stock study.
 
 ## Primary references

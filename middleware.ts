@@ -11,6 +11,8 @@ const PUBLIC_PATHS = [
   '/icon-512.png',
   '/apple-touch-icon.png',
   '/favicon.ico',
+  // This one server callback validates its own random bearer credential.
+  '/api/alerts/gold-petal/tick',
 ];
 
 function isPublicPath(pathname: string) {

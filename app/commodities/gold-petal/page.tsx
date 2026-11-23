@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { Gem, RefreshCw, ShieldCheck, Bell, Download } from 'lucide-react';
 import AngelBudgetPanel from '@/components/AngelBudgetPanel';
+import GoldPetalBackgroundAlerts from '@/components/GoldPetalBackgroundAlerts';
 import { useGoldPetalBook } from '@/hooks/useGoldPetalBook';
 import { istDateKey } from '@/lib/marketHours';
 import {
@@ -407,6 +408,8 @@ export default function GoldPetalPage() {
         </p>
       </section>
 
+      <GoldPetalBackgroundAlerts feeFloor={{ stop: Number(fields.feeAtStop) || 0, target: Number(fields.feeAtTarget) || 0 }} />
+
       <section className="scanner-card space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="font-semibold">2 · Check the contract and data</h2>
@@ -436,7 +439,7 @@ export default function GoldPetalPage() {
             ? 'Checking about every 30 seconds while this page is visible.'
             : 'Monitoring paused.'}{' '}
           Checks use the shared Angel allowance. Hidden tabs pause checks;
-          closing the app stops alerts.
+          closing the app stops these on-screen checks and exit alerts. The separate background candidate watch above can continue when enabled.
         </p>
         <AngelBudgetPanel scanBusy={busy} />
         {feed?.errors.map((e, i) => (
