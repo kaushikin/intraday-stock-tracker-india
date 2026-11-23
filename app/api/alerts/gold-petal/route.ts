@@ -49,6 +49,10 @@ export async function POST(req: NextRequest) {
           throw new Error();
         await petalAlerts.confirm(body.revision);
         break;
+      case 'closed-test':
+        if (typeof body.revision !== 'string' || body.revision.length > 100)
+          throw new Error();
+        return json(await petalAlerts.queueClosedTest(body.revision));
       case 'stop':
         if (
           body.revision !== undefined &&
@@ -65,7 +69,7 @@ export async function POST(req: NextRequest) {
     // Only our user-facing validation errors; never return provider bodies/tokens.
     const message =
       e instanceof Error &&
-      /^(Confirm|Select QStash|Scheduler |Connect the free|Today’s entry|Invalid browser|This browser|The alert test)/.test(
+      /^(Confirm|Select QStash|Scheduler |Connect the free|Today’s entry|Invalid browser|This browser|The alert test|The closed-page test)/.test(
         e.message,
       )
         ? e.message

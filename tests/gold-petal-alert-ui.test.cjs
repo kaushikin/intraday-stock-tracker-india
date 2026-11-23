@@ -114,6 +114,15 @@ async function mount(t, permission = 'granted') {
       if (body.action === 'confirm')
         state.watch = { ...state.watch, confirmed: true };
       if (body.action === 'stop') state.watch = null;
+      if (body.action === 'closed-test') {
+        state.closedTest = {
+          state: 'queued',
+          message: 'Test queued. Close every app tab now.',
+          notBefore: f.now.toISOString(),
+          expiresAt: f.now.toISOString(),
+        };
+        return { ok: true, json: async () => state.closedTest };
+      }
     }
     return { ok: true, json: async () => ({ ...state }) };
   };
@@ -173,6 +182,17 @@ test('enable, confirm delivered test and invalidate changed risk leave both stoc
   await act(async () => button(el, 'I received the test notification').click());
   await settled(el);
   assert.equal(state.watch.confirmed, true);
+  await act(async () =>
+    button(el, 'Send closed-page test in 1–2 minutes').click(),
+  );
+  await settled(el);
+  assert.ok(
+    actions.some(
+      (a) => a.action === 'closed-test' && a.revision === 'test-revision',
+    ),
+  );
+  assert.match(el.textContent, /Test queued/);
+  assert.ok(button(el, 'Send closed-page test in 1–2 minutes').disabled);
   assert.ok(writes.every((k) => k === PETAL_ALERT_LOCAL_KEY));
   for (const [k, v] of Object.entries(records))
     assert.equal(localStorage.getItem(k), v, k);

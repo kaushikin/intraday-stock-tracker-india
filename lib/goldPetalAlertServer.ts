@@ -31,6 +31,14 @@ type Watch = {
   expiresAt: string;
   confirmed: boolean;
 };
+type ClosedPageTest = {
+  id: string;
+  revision: string;
+  state: 'queued' | 'sent' | 'error' | 'expired' | 'cancelled';
+  notBefore: string;
+  expiresAt: string;
+  message: string;
+};
 type Runtime = {
   redis: AlertRedis;
   key: (s: string) => string;
@@ -129,15 +137,17 @@ export function createPetalAlerts(overrides: Partial<Runtime> = {}) {
     });
   }
   async function status() {
-    const [keys, schedule, watch, last, heartbeat] = await Promise.all([
-      secrets(),
-      get<{ id: string }>('schedule'),
-      get<Watch>('watch'),
-      get<{ revision: string; at: string; state: string; message: string }>(
-        'last',
-      ),
-      get<{ at: string }>('heartbeat'),
-    ]);
+    const [keys, schedule, watch, last, heartbeat, closedTest] =
+      await Promise.all([
+        secrets(),
+        get<{ id: string }>('schedule'),
+        get<Watch>('watch'),
+        get<{ revision: string; at: string; state: string; message: string }>(
+          'last',
+        ),
+        get<{ at: string }>('heartbeat'),
+        get<ClosedPageTest>('closed-test'),
+      ]);
     const active =
       !!watch &&
       Date.parse(watch.expiresAt) > rt.now().getTime() &&
@@ -159,6 +169,24 @@ export function createPetalAlerts(overrides: Partial<Runtime> = {}) {
           }
         : null,
       last: watch && last?.revision !== watch.revision ? null : last,
+      closedTest:
+        closedTest?.state === 'queued' &&
+        (!active || watch?.revision !== closedTest.revision)
+          ? {
+              ...closedTest,
+              state: 'cancelled',
+              message:
+                'Test cancelled because the watch stopped, changed or expired.',
+            }
+          : closedTest?.state === 'queued' &&
+              Date.parse(closedTest.expiresAt) <= rt.now().getTime()
+            ? {
+                ...closedTest,
+                state: 'expired',
+                message:
+                  'No scheduled test delivery was completed in time. Check QStash logs and the last server contact before retrying.',
+              }
+            : closedTest,
     };
   }
   async function connect(token: string, freeConfirmed: boolean) {
@@ -274,6 +302,118 @@ export function createPetalAlerts(overrides: Partial<Runtime> = {}) {
         'The alert test expired or was replaced. Enable alerts again.',
       );
   }
+  async function queueClosedTest(revision: string) {
+    const now = rt.now(),
+      watch = await get<Watch>('watch');
+    if (!watch || watch.revision !== revision || !watch.confirmed)
+      throw new Error(
+        'Confirm the first test notification and enable today’s watch before the closed-page test.',
+      );
+    if (
+      petalSessionProblem(now) ||
+      Date.parse(watch.expiresAt) - now.getTime() <= 180000
+    )
+      throw new Error(
+        'The closed-page test is available on trading days from 18:00 until 21:27 IST.',
+      );
+    if (!(await get('schedule')))
+      throw new Error('Connect the free scheduler first.');
+    if (
+      !(await rt.redis(['SET', rt.key('test-throttle'), '1', 'NX', 'EX', 180]))
+    )
+      throw new Error(
+        'The closed-page test was requested recently. Wait three minutes before another test.',
+      );
+    const test: ClosedPageTest = {
+      id: randomUUID(),
+      revision,
+      state: 'queued',
+      notBefore: new Date(now.getTime() + 45000).toISOString(),
+      expiresAt: new Date(now.getTime() + 180000).toISOString(),
+      message:
+        'Test queued. Close every app tab now. Keep the device online and awake; expect a labelled notification in about 1–2 minutes. No test trade is created.',
+    };
+    await set('closed-test', test);
+    return test;
+  }
+  async function deliverClosedTest(watch: Watch, now: Date) {
+    const test = await get<ClosedPageTest>('closed-test');
+    if (!test || test.state !== 'queued' || test.revision !== watch.revision)
+      return null;
+    if (now.getTime() < Date.parse(test.notBefore))
+      return { state: 'test-waiting' };
+    if (now.getTime() >= Date.parse(test.expiresAt)) {
+      await rt.redis([
+        'EVAL',
+        "local raw=redis.call('GET',KEYS[1]); if raw and cjson.decode(raw).id==ARGV[1] then redis.call('SET',KEYS[1],ARGV[2],'KEEPTTL'); return 1 end; return 0",
+        1,
+        rt.key('closed-test'),
+        test.id,
+        JSON.stringify({
+          ...test,
+          state: 'expired',
+          message:
+            'The scheduled test did not finish within three minutes. Check QStash logs and notification settings before retrying.',
+        }),
+      ]);
+      return { state: 'test-expired' };
+    }
+    if (
+      !(await rt.redis([
+        'SET',
+        rt.key('test-claim:' + test.id),
+        '1',
+        'NX',
+        'EX',
+        86400,
+      ]))
+    )
+      return { state: 'test-claimed' };
+    const latest = await get<Watch>('watch');
+    if (
+      latest?.revision !== watch.revision ||
+      !latest.confirmed ||
+      Date.parse(latest.expiresAt) <= rt.now().getTime()
+    )
+      return { state: 'test-cancelled' };
+    let result: ClosedPageTest;
+    try {
+      await send(
+        watch.subscription,
+        {
+          title: 'Gold Petal · closed-page TEST',
+          body: 'Notification test only. The background scheduler sent this after a delay. No market signal, paper trade or broker order was created.',
+          kind: 'TEST',
+          tag: 'closed-' + test.id,
+          expiresAt: rt.now().getTime() + 60000,
+        },
+        60,
+      );
+      result = {
+        ...test,
+        state: 'sent',
+        message:
+          'Closed-page test accepted by the push provider. Count the test as passed only if you saw its notification while the app was closed.',
+      };
+    } catch {
+      result = {
+        ...test,
+        state: 'error',
+        message:
+          'Closed-page test delivery failed or is uncertain. Check notification permission and retry after three minutes. No paper trade was created.',
+      };
+    }
+    // Preserve a newer test if the user requested another while delivery finished.
+    await rt.redis([
+      'EVAL',
+      "local raw=redis.call('GET',KEYS[1]); if raw and cjson.decode(raw).id==ARGV[1] then redis.call('SET',KEYS[1],ARGV[2],'KEEPTTL'); return 1 end; return 0",
+      1,
+      rt.key('closed-test'),
+      test.id,
+      JSON.stringify(result),
+    ]);
+    return { state: result.state === 'sent' ? 'test-sent' : 'test-error' };
+  }
   async function authenticate(authorization: string | null) {
     // A callback cannot initialise credentials or use the app login cookie.
     const keys = await get<Secrets>('secrets');
@@ -304,6 +444,8 @@ export function createPetalAlerts(overrides: Partial<Runtime> = {}) {
     )
       return { state: 'off' };
     if (!watch.confirmed) return { state: 'test-not-confirmed' };
+    const testResult = await deliverClosedTest(watch, now);
+    if (testResult) return testResult;
     const session = petalSessionProblem(now);
     if (session) {
       await set('last', {
@@ -380,6 +522,15 @@ export function createPetalAlerts(overrides: Partial<Runtime> = {}) {
       return { state: 'error' };
     }
   }
-  return { status, connect, arm, stop, confirm, authenticate, tick };
+  return {
+    status,
+    connect,
+    arm,
+    stop,
+    confirm,
+    queueClosedTest,
+    authenticate,
+    tick,
+  };
 }
 export const petalAlerts = createPetalAlerts();

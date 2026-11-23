@@ -24,6 +24,12 @@ type Status = {
     feeFloor: { stop: number; target: number };
   };
   last?: { at: string; state: string; message: string };
+  closedTest?: {
+    state: string;
+    message: string;
+    notBefore: string;
+    expiresAt: string;
+  };
 };
 const time = (s: string) =>
   new Date(s).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) + ' IST';
@@ -243,6 +249,14 @@ export default function GoldPetalBackgroundAlerts({
           {error || note}
         </p>
       )}
+      {status?.closedTest && (
+        <p
+          role="status"
+          className="rounded-xl bg-slate-950/50 p-3 text-sm text-amber-200"
+        >
+          Closed-page test: {status.closedTest.message}
+        </p>
+      )}
       {!status?.schedulerConnected && (
         <details className="rounded-xl border border-slate-700 p-4">
           <summary className="cursor-pointer text-sm text-teal-200">
@@ -263,12 +277,16 @@ export default function GoldPetalBackgroundAlerts({
               Redis connection does not automatically enable QStash.
             </li>
             <li>
-              Select <strong>Free</strong>. Do not choose Pay as You Go or a
-              paid plan. If Free is unavailable, stop here.
+              In QStash, select the <strong>EU region</strong>, then{' '}
+              <strong>Free</strong>. This app uses QStash’s default EU
+              connection. Do not choose Pay as You Go or a paid plan. If Free is
+              unavailable, stop here.
             </li>
             <li>
-              Copy the QStash token from its dashboard into the private field
-              below. Never paste it in chat.
+              Copy <strong>QSTASH_TOKEN</strong> from the EU Quickstart section
+              into the private field below. Use the token value only, without
+              quotes. Do not use a Redis token or either signing key. Never
+              paste it in chat.
             </li>
           </ol>
           <p className="mt-3 text-xs text-slate-400">
@@ -358,6 +376,24 @@ export default function GoldPetalBackgroundAlerts({
             I received the test notification
           </button>
         )}
+        {watch?.confirmed && (
+          <button
+            className="scanner-secondary"
+            disabled={busy || status?.closedTest?.state === 'queued'}
+            onClick={() =>
+              void run(async () => {
+                await invalidateChangedAlertRisk();
+                const result = await alertAction({
+                  action: 'closed-test',
+                  revision: watch.revision,
+                });
+                setNote(result.message);
+              })
+            }
+          >
+            Send closed-page test in 1–2 minutes
+          </button>
+        )}
         <button
           className="scanner-secondary"
           disabled={busy || !status?.schedulerConnected}
@@ -379,6 +415,17 @@ export default function GoldPetalBackgroundAlerts({
           Check alert status
         </button>
       </div>
+      <p className="text-xs leading-relaxed text-slate-400">
+        To test with the page closed: confirm the first notification, then
+        choose “Send closed-page test in 1–2 minutes” between 18:00 and 21:27
+        IST on a trading day. Wait for “Test queued”, close all app tabs and
+        leave the browser running for this first test. A separate “closed-page
+        TEST” notification should arrive. This tests the scheduler and
+        notification delivery without fetching market data or creating a trade.
+        Candidate scans pause briefly during this test and resume afterward. If
+        no test arrives within three minutes, reopen the panel and check its
+        status; do not assume it passed.
+      </p>
       <p className="text-xs leading-relaxed text-slate-400">
         Enable afresh each day; the watch expires at 21:30 IST. Checks run about
         once a minute through the shared Angel limits. One alert per qualifying

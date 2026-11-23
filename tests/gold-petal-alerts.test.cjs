@@ -56,6 +56,11 @@ function runtime() {
         entry = data.get(k);
       if (!entry) return 0;
       const w = JSON.parse(entry.raw);
+      if (key.includes('cjson.decode(raw).id==ARGV[1]')) {
+        if (w.id !== revision) return 0;
+        entry.raw = rest[3];
+        return 1;
+      }
       if (w.revision !== revision) return 0;
       if (key.includes('w.confirmed=true')) {
         w.confirmed = true;
@@ -292,4 +297,69 @@ test('callback rejects missing credentials, and setup rejects foreign origins be
     ).status,
     403,
   );
+});
+
+test('closed-page test waits for a scheduled callback, sends once, and never fetches market data or changes the watch', async () => {
+  const r = runtime();
+  await r.api.connect('x'.repeat(30), true);
+  const watch = await r.api.arm(risk(), subscription, true);
+  await assert.rejects(r.api.queueClosedTest(watch.revision));
+  await r.api.confirm(watch.revision);
+  const before = r.data.get('watch').raw;
+  await r.api.queueClosedTest(watch.revision);
+  await assert.rejects(r.api.queueClosedTest(watch.revision));
+  assert.equal(
+    (await r.api.tick(new AbortController().signal)).state,
+    'test-waiting',
+  );
+  assert.equal(r.pushes.length, 1);
+  r.advance(60000);
+  assert.equal(
+    (await r.api.tick(new AbortController().signal)).state,
+    'test-sent',
+  );
+  assert.equal(r.pushes.length, 2);
+  assert.equal(r.pushes[1].payload.title, 'Gold Petal · closed-page TEST');
+  assert.equal(r.pushes[1].payload.kind, 'TEST');
+  assert.equal(r.calls(), 0);
+  assert.equal(r.data.get('watch').raw, before);
+  assert.equal((await r.api.status()).closedTest.state, 'sent');
+  assert.equal(
+    (await r.api.tick(new AbortController().signal)).state,
+    'duplicate',
+  );
+  assert.equal(r.pushes.length, 2);
+});
+test('closed-page test cancels with a stopped watch and expires without blocking future candidate checks', async () => {
+  for (const mode of ['stop', 'expire', 'failure']) {
+    const r = runtime();
+    await r.api.connect('x'.repeat(30), true);
+    const watch = await r.api.arm(risk(), subscription, true);
+    await r.api.confirm(watch.revision);
+    await r.api.queueClosedTest(watch.revision);
+    if (mode === 'stop') await r.api.stop(watch.revision);
+    if (mode === 'expire') r.advance(181000);
+    else r.advance(60000);
+    if (mode === 'failure') r.pushError();
+    const result = await r.api.tick(new AbortController().signal);
+    assert.equal(
+      result.state,
+      { stop: 'off', expire: 'test-expired', failure: 'test-error' }[mode],
+    );
+    assert.equal(r.pushes.length, 1, mode);
+    assert.equal(r.calls(), 0, mode);
+    assert.equal(
+      (await r.api.status()).closedTest.state,
+      { stop: 'cancelled', expire: 'expired', failure: 'error' }[mode],
+    );
+    if (mode === 'expire') {
+      r.advance(60000);
+      await r.api.tick(new AbortController().signal);
+      assert.equal(
+        r.calls(),
+        1,
+        'normal market checks resume after a missed test',
+      );
+    }
+  }
 });
