@@ -249,6 +249,11 @@ test('all 50 shares are fetched in paced sequential batches, with quotes only af
   assert.equal(candleCalls.length, 13);
   assert.equal(quoteCalls.length, 4);
   assert.ok(candleCalls.every((c) => c.body.symbols.length <= 5));
+  assert.equal(
+    candleCalls.filter((c) => c.body.symbols.includes('NIFTY')).length,
+    1
+  );
+  assert.ok(candleCalls.at(-1).body.symbols.includes('NIFTY'));
   assert.ok(quoteCalls.every((c) => c.body.items.length <= 15));
   assert.ok(waits.every((ms) => ms >= 1000));
   assert.equal(

@@ -81,6 +81,66 @@ async function change(container, label, value) {
   await act(async () => Simulate.change(el, { target: { value } }));
 }
 
+test('scanner can pause background market polling without changing either saved study or journal', async (t) => {
+  const previousFetch = global.fetch;
+  const hidden = Object.getOwnPropertyDescriptor(document, 'hidden');
+  Object.defineProperty(document, 'hidden', {
+    value: false,
+    configurable: true,
+  });
+  let requests = 0;
+  global.fetch = async (url) => {
+    requests++;
+    return Response.json(
+      url.endsWith('/candles')
+        ? { success: true, candles: {}, errors: [] }
+        : { success: true, quotes: [], errors: [] }
+    );
+  };
+  t.after(() => {
+    global.fetch = previousFetch;
+    if (hidden) Object.defineProperty(document, 'hidden', hidden);
+    else delete document.hidden;
+  });
+  const study = JSON.stringify({
+    ...b.emptyPaperBook(),
+    research: { symbols: ['RELIANCE', 'TCS', 'HDFCBANK'] },
+  });
+  const scanner = JSON.stringify(require('./fixtures/scanner-v1-closed.json'));
+  localStorage.setItem('paper_trading_book_v1', study);
+  localStorage.setItem('scanner_paper_journal_v1', scanner);
+  const { root } = await mount(
+    React.createElement(
+      context.AppProvider,
+      { autoRefresh: false },
+      React.createElement('div')
+    ),
+    t
+  );
+  assert.equal(requests, 0);
+  await act(async () =>
+    root.render(
+      React.createElement(
+        context.AppProvider,
+        { autoRefresh: true },
+        React.createElement('div')
+      )
+    )
+  );
+  assert.equal(requests, 2);
+  await act(async () =>
+    root.render(
+      React.createElement(
+        context.AppProvider,
+        { autoRefresh: false },
+        React.createElement('div')
+      )
+    )
+  );
+  assert.equal(localStorage.getItem('paper_trading_book_v1'), study);
+  assert.equal(localStorage.getItem('scanner_paper_journal_v1'), scanner);
+});
+
 test('status panel shows provider failures and exchange timestamps alongside current data', async (t) => {
   const { container } = await mount(
     React.createElement(DataStatus.default, {
@@ -329,7 +389,9 @@ test('provider state preserves the fixed study universe and clears failed quotes
 test('paper entry stays blocked until comparison passes and rechecks the latest stored evidence on click', async (t) => {
   const strategy = require('../lib/paperStrategy.ts');
   const research = require('../lib/researchEvidence.ts');
-  const scannerFixture = require('./scanner-journal-fixtures.cjs').entered('BSE');
+  const scannerFixture = require('./scanner-journal-fixtures.cjs').entered(
+    'BSE'
+  );
   const scannerJournal = require('../lib/scannerJournal.ts');
   const originalSetup = strategy.findPaperSetup;
   const originalContext = context.useApp;
@@ -419,13 +481,29 @@ test('paper entry stays blocked until comparison passes and rechecks the latest 
   localStorage.setItem(b.PAPER_BOOK_KEY, JSON.stringify(matched));
   await act(async () => window.dispatchEvent(new Event('paperBookUpdated')));
   // Simulate another tab opening a scanner trade before its storage event arrives.
-  localStorage.setItem(scannerJournal.SCANNER_BOOK_KEY, JSON.stringify(scannerFixture.book));
-  await act(async () => findButton(container, 'Record paper entry at ask').click());
-  assert.equal(JSON.parse(localStorage.getItem(b.PAPER_BOOK_KEY)).positions.length, 0);
-  assert.match(container.textContent, /Across both journals: Close the existing paper position/);
+  localStorage.setItem(
+    scannerJournal.SCANNER_BOOK_KEY,
+    JSON.stringify(scannerFixture.book)
+  );
+  await act(async () =>
+    findButton(container, 'Record paper entry at ask').click()
+  );
+  assert.equal(
+    JSON.parse(localStorage.getItem(b.PAPER_BOOK_KEY)).positions.length,
+    0
+  );
+  assert.match(
+    container.textContent,
+    /Across both journals: Close the existing paper position/
+  );
   localStorage.removeItem(scannerJournal.SCANNER_BOOK_KEY);
   await act(async () => window.dispatchEvent(new Event('scannerBookUpdated')));
-  await act(async () => findButton(container, 'Record paper entry at ask').click());
-  assert.equal(JSON.parse(localStorage.getItem(b.PAPER_BOOK_KEY)).positions.length, 1);
+  await act(async () =>
+    findButton(container, 'Record paper entry at ask').click()
+  );
+  assert.equal(
+    JSON.parse(localStorage.getItem(b.PAPER_BOOK_KEY)).positions.length,
+    1
+  );
   assert.match(container.textContent, /No broker order was sent/);
 });

@@ -33,6 +33,14 @@ function pause(ms: number, signal: AbortSignal) {
   });
 }
 class ScanAuthError extends Error {}
+class ScanRequestError extends Error {
+  constructor(
+    message: string,
+    public retryable: boolean
+  ) {
+    super(message);
+  }
+}
 const defaults: Runtime = {
   fetcher: (...args) => fetch(...args),
   pause,
@@ -45,22 +53,69 @@ async function jsonRequest(
   runtime: Runtime
 ) {
   signal.throwIfAborted();
-  const response = await runtime.fetcher(url, {
-    method: body === undefined ? 'GET' : 'POST',
-    headers:
-      body === undefined ? undefined : { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-    cache: 'no-store',
-    signal: AbortSignal.any([signal, AbortSignal.timeout(55_000)]),
-  });
-  if (response.status === 401)
-    throw new ScanAuthError('Session expired. Sign in again.');
-  const data = await response.json();
-  if (!response.ok || !data.success)
-    throw new Error(
-      data.error || `Provider request failed (HTTP ${response.status}).`
-    );
-  return data;
+  const label = url.endsWith('/nifty50')
+    ? 'Nifty 50 membership'
+    : url.endsWith('/candles')
+      ? 'Candle feed'
+      : 'Quote feed';
+  const bounded = AbortSignal.any([signal, AbortSignal.timeout(55_000)]);
+  for (let attempt = 0; ; attempt++) {
+    try {
+      bounded.throwIfAborted();
+      const response = await runtime.fetcher(url, {
+        method: body === undefined ? 'GET' : 'POST',
+        headers:
+          body === undefined
+            ? undefined
+            : { 'Content-Type': 'application/json' },
+        body: body === undefined ? undefined : JSON.stringify(body),
+        cache: 'no-store',
+        signal: bounded,
+      });
+      if (response.status === 401)
+        throw new ScanAuthError('Session expired. Sign in again.');
+      const retryAfter = response.headers.get('retry-after');
+      const retryDelay = retryAfter
+        ? /^\d+$/.test(retryAfter)
+          ? Number(retryAfter) * 1000
+          : Date.parse(retryAfter) - runtime.now().getTime()
+        : 0;
+      const retryable =
+        (response.ok || response.status >= 500 || response.status === 429) &&
+        !(retryDelay > 1500);
+      let data: any;
+      try {
+        data = await response.json();
+      } catch {
+        throw new ScanRequestError(
+          `${label} returned an unreadable response (HTTP ${response.status}). Recheck when the connection recovers.`,
+          retryable
+        );
+      }
+      if (!response.ok || !data?.success)
+        throw new ScanRequestError(
+          `${label}: ${String(data?.error || `request failed (HTTP ${response.status})`).slice(0, 200)}`,
+          !response.ok && retryable
+        );
+      return data;
+    } catch (cause) {
+      signal.throwIfAborted();
+      if (bounded.aborted)
+        throw new Error(
+          `${label} timed out. Recheck when the connection recovers.`
+        );
+      if (cause instanceof ScanAuthError) throw cause;
+      const error =
+        cause instanceof ScanRequestError
+          ? cause
+          : new ScanRequestError(
+              `${label} connection failed. Check your connection and recheck.`,
+              true
+            );
+      if (!error.retryable || attempt >= 1) throw error;
+      await runtime.pause(1500, signal);
+    }
+  }
 }
 export async function loadScannerUniverse(
   signal: AbortSignal,
@@ -129,7 +184,8 @@ export async function fetchScannerData(
   for (let offset = 0; offset < symbols.length; offset += 4) {
     signal.throwIfAborted();
     const shares = symbols.slice(offset, offset + 4),
-      batch = [...shares, 'NIFTY'];
+      // Fetch the common index once, with the final batch, closest to quote time.
+      batch = offset + 4 >= symbols.length ? [...shares, 'NIFTY'] : shares;
     try {
       const result = await jsonRequest(
         '/api/market/candles',
@@ -141,10 +197,12 @@ export async function fetchScannerData(
         data.candles[s] = Array.isArray(result.candles?.[s])
           ? result.candles[s]
           : [];
-      data.candles.NIFTY = Array.isArray(result.candles?.NIFTY)
-        ? result.candles.NIFTY
-        : [];
-      delete data.errors.NIFTY;
+      if (batch.includes('NIFTY')) {
+        data.candles.NIFTY = Array.isArray(result.candles?.NIFTY)
+          ? result.candles.NIFTY
+          : [];
+        delete data.errors.NIFTY;
+      }
       const errors = requestErrors(
         result,
         batch,

@@ -128,7 +128,13 @@ function calculateTradePL(trade: Trade) {
   return gross - trade.brokerage;
 }
 
-export function AppProvider({ children }: { children: ReactNode }) {
+export function AppProvider({
+  children,
+  autoRefresh = true,
+}: {
+  children: ReactNode;
+  autoRefresh?: boolean;
+}) {
   const [watchlist, setWatchlist] = useState<string[]>([
     'RELIANCE',
     'TCS',
@@ -458,7 +464,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [watchlist, studySymbols]);
 
   useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated || !autoRefresh) return;
     let lastCandleFetch = 0;
     const refresh = () => {
       setToday(istDateKey());
@@ -487,7 +493,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('focus', resume);
       document.removeEventListener('visibilitychange', resume);
     };
-  }, [hydrated, updatePrices, updateCandles]);
+  }, [hydrated, autoRefresh, updatePrices, updateCandles]);
 
   const addToWatchlist = (symbol: string) => {
     const upperSymbol = symbol.toUpperCase().trim();

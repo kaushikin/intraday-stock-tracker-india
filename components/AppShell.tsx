@@ -9,8 +9,9 @@ import Disclaimer from './Disclaimer';
 import MarketStatus from './MarketStatus';
 
 export default function AppShell({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
   // Do not mount journal readers, persisted app state or live polling in the demo.
-  if (usePathname() === '/market/demo') {
+  if (pathname === '/market/demo') {
     return (
       <main className="mx-auto min-h-screen max-w-md px-5 py-6">
         {children}
@@ -19,7 +20,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   }
   return (
     <AlertProvider>
-      <AppProvider>
+      <AppProvider autoRefresh={pathname !== '/market'}>
         <AlertToasts />
         <div className="min-h-screen pb-20 max-w-md mx-auto relative">
           <MarketStatus />

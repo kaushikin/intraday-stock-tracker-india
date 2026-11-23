@@ -134,3 +134,57 @@ test('candle adapter excludes incomplete bars and never returns expired cached c
   assert.deepEqual(second.candles.SBIN, []);
   assert.match(second.errors[0].error, /timeout/);
 });
+
+test('overlapping candle requests share one fetch and the cache cannot cross a new candle close', async (t) => {
+  const oldMaster = master.getCashInstruments,
+    oldCandles = angel.getAngelCandleData,
+    OldDate = Date;
+  let clock = new OldDate('2026-11-20T11:14:55+05:30').getTime();
+  global.Date = class extends OldDate {
+    constructor(...args) {
+      super(...(args.length ? args : [clock]));
+    }
+    static now() {
+      return clock;
+    }
+  };
+  t.after(() => {
+    master.getCashInstruments = oldMaster;
+    angel.getAngelCandleData = oldCandles;
+    global.Date = OldDate;
+    delete global.angelCandleCache;
+  });
+  master.getCashInstruments = async () => ({ SBIN: instrument });
+  global.angelCandleCache = {};
+  let calls = 0,
+    release;
+  const rows = [
+    ['2026-11-20T11:05:00+05:30', 200, 201, 199, 200, 100],
+    ['2026-11-20T11:10:00+05:30', 200, 202, 199, 201, 100],
+  ];
+  angel.getAngelCandleData = async () => {
+    calls++;
+    await new Promise((r) => (release = r));
+    return { data: rows };
+  };
+  const body = { symbols: ['SBIN'], interval: 'FIVE_MINUTE' };
+  const pending = [candles.POST(request(body)), candles.POST(request(body))];
+  await new Promise(setImmediate);
+  release();
+  const results = await Promise.all(pending.map(async (r) => (await r).json()));
+  assert.equal(calls, 1);
+  assert.equal(results[0].candles.SBIN.length, 1);
+  assert.deepEqual(results[0].candles, results[1].candles);
+  assert.equal(
+    Object.values(global.angelCandleCache)[0].expiresAt,
+    new OldDate('2026-11-20T11:15:00+05:30').getTime()
+  );
+  clock += 6000;
+  angel.getAngelCandleData = async () => {
+    calls++;
+    return { data: rows };
+  };
+  const fresh = await (await candles.POST(request(body))).json();
+  assert.equal(calls, 2);
+  assert.equal(fresh.candles.SBIN.length, 2);
+});

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAngelCandleData } from '@/lib/angel';
 import { getCashInstruments } from '@/lib/cashInstruments';
 import { completedCandles } from '@/lib/marketDataQuality';
+import { AngelRequestError } from '@/lib/angelTransport';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -25,12 +26,7 @@ declare global {
   var angelCandleCache: Record<string, CandleCacheValue> | undefined;
 }
 
-const CANDLE_CACHE_TTL_MS = 20 * 1000;
-const CANDLE_SYMBOL_DELAY_MS = 800;
-
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+const pendingCandles = new Map<string, Promise<Candle[]>>();
 
 function formatAngelDate(date: Date) {
   const parts = new Intl.DateTimeFormat('en-GB', {
@@ -151,6 +147,7 @@ function getTodayAngelRange() {
 
 function normalizeAngelCandles(rawCandles: any[]): Candle[] {
   return rawCandles
+    .filter((item) => Array.isArray(item) && item.length >= 6)
     .map((item) => {
       return {
         time: String(item[0]),
@@ -169,6 +166,8 @@ function normalizeAngelCandles(rawCandles: any[]): Candle[] {
 }
 
 export async function POST(req: NextRequest) {
+  // Leave time to return explicit failures before the client/serverless deadlines.
+  const deadline = AbortSignal.timeout(45_000);
   try {
     const body = await req.json();
 
@@ -228,7 +227,7 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
-      const cacheKey = `${symbol}:${interval}:${fromdate}:${Math.floor(Date.now() / 300000)}`;
+      const cacheKey = `${symbol}:${instrument.token}:${interval}:${fromdate}:${Math.floor(Date.now() / 300000)}`;
       const cached = global.angelCandleCache[cacheKey];
 
       if (cached && cached.expiresAt > Date.now()) {
@@ -237,34 +236,60 @@ export async function POST(req: NextRequest) {
       }
 
       try {
-        const angelResponse = await getAngelCandleData({
-          exchange: instrument.exchange,
-          symboltoken: instrument.token,
-          interval,
-          fromdate,
-          todate,
-        });
-
-        const normalizedCandles = completedCandles(
-          normalizeAngelCandles(angelResponse?.data || [])
-        );
-
-        result[symbol] = normalizedCandles;
-
-        global.angelCandleCache[cacheKey] = {
-          expiresAt: Date.now() + CANDLE_CACHE_TTL_MS,
-          candles: normalizedCandles,
-        };
+        deadline.throwIfAborted();
+        let pending = pendingCandles.get(cacheKey);
+        if (!pending) {
+          pending = (async () => {
+            const response = await getAngelCandleData(
+              {
+                exchange: instrument.exchange,
+                symboltoken: instrument.token,
+                interval,
+                fromdate,
+                todate,
+              },
+              deadline
+            );
+            const candles = completedCandles(
+              normalizeAngelCandles(response?.data || [])
+            );
+            if (!candles.length)
+              throw new Error('Angel returned no usable completed candles.');
+            // Never cache beyond the next candle close or serve expired data after a failure.
+            global.angelCandleCache![cacheKey] = {
+              expiresAt: Math.min(
+                Date.now() + 60_000,
+                Date.parse(candles.at(-1)!.time) + 600_000
+              ),
+              candles,
+            };
+            return candles;
+          })();
+          pendingCandles.set(cacheKey, pending);
+          // Both handlers consume the cleanup promise; no detached rejected promise.
+          void pending.then(
+            () => pendingCandles.delete(cacheKey),
+            () => pendingCandles.delete(cacheKey)
+          );
+        }
+        result[symbol] = await pending;
       } catch (error: any) {
         // Clear the failed symbol. Never silently promote stale cached candles.
         result[symbol] = [];
         errors.push({
           symbol,
-          error: error?.message || 'Failed to fetch candles',
+          error: deadline.aborted
+            ? 'Candle request timed out. Recheck this stock.'
+            : error?.message || 'Failed to fetch candles',
+          ...(error instanceof AngelRequestError
+            ? {
+                providerStatus: error.httpStatus,
+                code: error.kind,
+                retryable: error.retryable,
+              }
+            : {}),
         });
       }
-
-      await sleep(CANDLE_SYMBOL_DELAY_MS);
     }
 
     return NextResponse.json({

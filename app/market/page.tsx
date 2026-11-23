@@ -102,7 +102,7 @@ export default function MarketPage() {
       setProgress(null);
       const previous = snapshot,
         startedAt = new Date().toISOString();
-      setSnapshot(null);
+      if (!symbol) setSnapshot(null);
       try {
         const universe = await loadScannerUniverse(abort.signal);
         if (symbol && !universe.members.some((m) => m.symbol === symbol))
@@ -150,14 +150,39 @@ export default function MarketPage() {
           setNow(new Date());
         }
       } catch (e) {
-        if (mounted.current)
+        if (mounted.current) {
+          const message = abort.signal.aborted
+            ? 'Scan cancelled or paused when the tab was hidden. Run again when ready.'
+            : e instanceof Error
+              ? e.message
+              : 'Scan failed.';
           setError(
-            abort.signal.aborted
-              ? 'Scan cancelled or paused when the tab was hidden. Run again when ready.'
-              : e instanceof Error
-                ? e.message
-                : 'Scan failed.'
+            symbol
+              ? `${symbol} recheck failed. ${message} Previous results remain for reference; recheck again before entry.`
+              : message
           );
+          if (symbol && previous) {
+            // Keep context for retry, but invalidate the failed share AND the unverified index.
+            const quotes = { ...previous.data.quotes };
+            delete quotes[symbol];
+            setSnapshot({
+              ...previous,
+              data: {
+                ...previous.data,
+                quotes,
+                candles: { ...previous.data.candles, [symbol]: [], NIFTY: [] },
+                errors: {
+                  ...previous.data.errors,
+                  [symbol]: [message],
+                  NIFTY: [
+                    'Latest recheck failed; index confirmation must be refreshed.',
+                  ],
+                },
+              },
+            });
+            setNow(new Date());
+          }
+        }
       } finally {
         if (controller.current === abort) controller.current = null;
         if (mounted.current) setBusy(false);
@@ -183,6 +208,9 @@ export default function MarketPage() {
         snapshot.config,
         now,
         [
+          ...(busy
+            ? ['Recheck in progress. Previous results are for reference only.']
+            : []),
           ...(snapshot.universe.asOf !== istDateKey(now)
             ? [
                 'Universe verification belongs to an earlier day. Run a new scan.',
@@ -193,7 +221,7 @@ export default function MarketPage() {
         ]
       )
     );
-  }, [snapshot, now]);
+  }, [snapshot, now, busy]);
   const shortlist = rankShortlist(results),
     unavailable = results.filter((r) => r.status === 'UNAVAILABLE').length;
   function exportScan() {
@@ -274,7 +302,7 @@ export default function MarketPage() {
         )}
         <button
           className="mt-3 text-sm text-teal-300 underline disabled:opacity-40"
-          disabled={busy || !now || !isFreshSignalWindowOpenIST(now)}
+          disabled={busy || !now}
           onClick={() => void run(r.symbol)}
         >
           Recheck {r.symbol}
@@ -303,14 +331,16 @@ export default function MarketPage() {
           their original rules.
         </p>
       </header>
-      <section id="scanner-demo" className={`${card} scroll-mt-6 border-indigo-700`}>
+      <section
+        id="scanner-demo"
+        className={`${card} scroll-mt-6 border-indigo-700`}
+      >
         <h2 className="font-semibold">Practise first: ONGC demo mode</h2>
         <p className="mt-2 text-sm text-slate-300">
           Walk through fictional data verification, charges and a 3R entry.
-          Practise stop-loss, target-hit and 30-minute time exits. Demo
-          progress stays in memory; neither journal nor your three-stock
-          study is changed. Use it when you have no open paper position to
-          supervise.
+          Practise stop-loss, target-hit and 30-minute time exits. Demo progress
+          stays in memory; neither journal nor your three-stock study is
+          changed. Use it when you have no open paper position to supervise.
         </p>
         <Link
           href="/market/demo"
@@ -488,7 +518,9 @@ export default function MarketPage() {
             >
               source CSV
             </a>
-            . Last fetch completed {displayTime(snapshot.data.completedAt)}.
+            . Last fetch completed {displayTime(snapshot.data.completedAt)}.{' '}
+            Rechecks refresh one stock and NIFTY only; other rows keep their
+            original timestamps.
           </p>
         )}
       </section>

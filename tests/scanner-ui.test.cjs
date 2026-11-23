@@ -191,4 +191,30 @@ test('off-hours feed checks never produce a tradable shortlist', async (t) => {
     /Outside the entry window. This is a feed check only/
   );
   assert.match(el.textContent, /Shortlist · 0/);
+  assert.equal(button(el, 'Recheck SBIN').disabled, false);
+});
+
+test('failed rechecks retain context, block old eligibility, recover on retry and never write journals', async (t) => {
+  const el = await mount(t);
+  await act(async () => button(el, 'Scan Nifty 50').click());
+  assert.match(el.textContent, /Shortlist · 1/);
+  // Compare every saved key, including both books and the study configuration.
+  const before = JSON.stringify({ ...localStorage });
+  let reject;
+  feeds.loadScannerUniverse = () =>
+    new Promise((_resolve, fail) => (reject = fail));
+  await act(async () => button(el, 'Recheck SBIN').click());
+  assert.match(el.textContent, /All 50 results/);
+  assert.match(el.textContent, /Shortlist · 0/);
+  await act(async () => reject(new TypeError('Failed to fetch')));
+  assert.match(el.textContent, /SBIN recheck failed/);
+  assert.match(el.textContent, /Previous results remain for reference/);
+  assert.match(el.textContent, /Shortlist · 0/);
+  assert.match(el.textContent, /index confirmation must be refreshed/);
+  assert.equal(button(el, 'Recheck SBIN').disabled, false);
+  feeds.loadScannerUniverse = async () => universe;
+  await act(async () => button(el, 'Recheck SBIN').click());
+  assert.match(el.textContent, /Shortlist · 1/);
+  assert.doesNotMatch(el.textContent, /SBIN recheck failed/);
+  assert.equal(JSON.stringify({ ...localStorage }), before);
 });

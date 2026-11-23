@@ -1,4 +1,5 @@
 import speakeasy from 'speakeasy';
+import { readAngel } from './angelTransport';
 
 type AngelSessionCache = {
   jwtToken?: string;
@@ -41,7 +42,8 @@ function angelHeaders(jwtToken?: string) {
   return headers;
 }
 
-export async function getAngelSession() {
+let pendingSession: Promise<AngelSessionCache> | undefined;
+export async function getAngelSession(): Promise<AngelSessionCache> {
   const now = Date.now();
 
   if (
@@ -51,7 +53,16 @@ export async function getAngelSession() {
   ) {
     return global.angelSessionCache;
   }
+  if (pendingSession) return pendingSession;
+  pendingSession = loginAngel();
+  try {
+    return await pendingSession;
+  } finally {
+    pendingSession = undefined;
+  }
+}
 
+async function loginAngel(): Promise<AngelSessionCache> {
   const clientCode = requiredEnv('ANGEL_CLIENT_CODE');
   const pin = requiredEnv('ANGEL_PIN');
   const totpSecret = requiredEnv('ANGEL_TOTP_SECRET');
@@ -61,7 +72,7 @@ export async function getAngelSession() {
     encoding: 'base32',
   });
 
-  const response = await fetch(
+  const data = await readAngel(
     'https://apiconnect.angelone.in/rest/auth/angelbroking/user/v1/loginByPassword',
     {
       method: 'POST',
@@ -73,21 +84,21 @@ export async function getAngelSession() {
       }),
       cache: 'no-store',
       signal: AbortSignal.timeout(10_000),
-    }
+    },
+    'login',
+    false
   );
-
-  const data = await response.json();
-
-  if (!response.ok || !data?.data?.jwtToken) {
-    console.error('Angel login failed:', data);
-    throw new Error(data?.message || 'Angel One login failed');
+  if (!data?.data?.jwtToken) {
+    throw new Error(
+      'Angel One login did not return a session. Check server credentials.'
+    );
   }
 
   const session: AngelSessionCache = {
     jwtToken: data.data.jwtToken,
     refreshToken: data.data.refreshToken,
     feedToken: data.data.feedToken,
-    expiresAt: now + 10 * 60 * 60 * 1000,
+    expiresAt: Date.now() + 10 * 60 * 60 * 1000,
   };
 
   global.angelSessionCache = session;
@@ -99,7 +110,7 @@ export async function getAngelMarketData(
 ) {
   const session = await getAngelSession();
 
-  const response = await fetch(
+  const data = await readAngel(
     'https://apiconnect.angelone.in/rest/secure/angelbroking/market/v1/quote/',
     {
       method: 'POST',
@@ -110,33 +121,9 @@ export async function getAngelMarketData(
       }),
       cache: 'no-store',
       signal: AbortSignal.timeout(10_000),
-    }
+    },
+    'quotes'
   );
-
-  const raw = await response.text();
-
-  let data: any;
-
-  try {
-    data = JSON.parse(raw);
-  } catch {
-    console.error('Angel returned non-JSON response:', {
-      status: response.status,
-      raw: raw.slice(0, 300),
-      exchangeTokens,
-    });
-
-    throw new Error(
-      raw.toLowerCase().includes('access')
-        ? 'Angel API access denied. Check IP whitelist, segment permission, or commodity/MCX access.'
-        : 'Angel returned invalid non-JSON response'
-    );
-  }
-
-  if (!response.ok || data?.status === false) {
-    console.error('Angel market data failed:', data);
-    throw new Error(data?.message || 'Failed to fetch Angel market data');
-  }
 
   return data;
 }
@@ -158,40 +145,25 @@ export type AngelCandleRequest = {
   todate: string;
 };
 
-export async function getAngelCandleData(request: AngelCandleRequest) {
+export async function getAngelCandleData(
+  request: AngelCandleRequest,
+  signal?: AbortSignal
+) {
   const session = await getAngelSession();
 
-  const response = await fetch(
+  const data = await readAngel(
     'https://apiconnect.angelone.in/rest/secure/angelbroking/historical/v1/getCandleData',
     {
       method: 'POST',
       headers: angelHeaders(session.jwtToken),
       body: JSON.stringify(request),
       cache: 'no-store',
-      signal: AbortSignal.timeout(10_000),
-    }
+      signal,
+    },
+    'candles'
   );
-
-  const raw = await response.text();
-
-  let data: any;
-
-  try {
-    data = JSON.parse(raw);
-  } catch {
-    console.error('Angel candle API returned non-JSON response:', {
-      status: response.status,
-      raw: raw.slice(0, 300),
-      request,
-    });
-
-    throw new Error('Angel candle API returned invalid non-JSON response');
-  }
-
-  if (!response.ok || data?.status === false) {
-    console.error('Angel candle data failed:', data);
-    throw new Error(data?.message || 'Failed to fetch Angel candle data');
-  }
+  if (!Array.isArray(data?.data))
+    throw new Error('Angel candles response contains no candle series.');
 
   return data;
 }
