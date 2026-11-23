@@ -105,4 +105,10 @@ Angel login, quotes and candles now share rolling limits of **2/second, 40/minut
 
 The [23 November commodity feasibility review](docs/commodity-validation.md) is displayed above the quotes. Standard lots fail the current risk plan: even a one-tick stop with one tick of slippage on each leg and normal brokerage/GST exceeds the requested ₹250 total daily ceiling, before other charges. BUY alerts stay blocked; EXIT monitoring is not active. The ₹250 figure is a planning ceiling, not an enforced balance or a per-trade allowance. This release does not add positions, orders, background monitoring or journal writes, and does not change cash-stock rules or the three-stock study. Profitability has not been validated.
 
+### Gold Petal paper pilot
+
+The separate [Gold Petal pilot](docs/gold-petal-paper-pilot.md) at `/commodities/gold-petal` uses ₹30,000 paper capital, one gram per lot, full-notional funding, ₹150 total trade risk and a ₹250 daily pilot-admission gate. It has its own record key and export. Both stock journals and the three-stock study stay unchanged; stock losses/open risk are read only. A daily declaration covers other activity. The gate cannot restrict other pages, devices or broker orders.
+
+The frozen long-only breakout candidate uses completed MCX candles, structural/ATR stops, normal commodity fees, adverse execution reserves and at least 2R after costs. One entry per IST day, independent Angel verification and fresh bid/ask data are required. Optional on-screen checks show exit alerts; the user records paper exits explicitly. Hidden/closed tabs do not provide continuous monitoring. Budget feasibility is conditional; strategy profitability is unproven. No broker orders are supported.
+
 Provider references: [Angel SmartAPI](https://smartapi.angelone.in/docs/ResponseStructure) and [current instrument master](https://margincalculator.angelone.in/OpenAPI_File/files/OpenAPIScripMaster.json). Product references are linked on each card. Quotes are exchange-quoted unit prices, not one-lot cost or margin.

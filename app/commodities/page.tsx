@@ -105,6 +105,22 @@ export default function CommoditiesPage() {
           orders or paper entries are created here.
         </p>
       </section>
+      <Link
+        href="/commodities/gold-petal"
+        className="scanner-card block border border-teal-700/60"
+      >
+        <p className="text-xs font-semibold uppercase tracking-wider text-teal-200">
+          Separate paper pilot
+        </p>
+        <h2 className="mt-2 text-xl font-semibold">Gold Petal · one gram</h2>
+        <p className="mt-2 text-sm text-slate-300">
+          ₹30,000 paper capital · no leverage · ₹150 trade risk · ₹250 total
+          daily ceiling. Review data and costs before any paper entry.
+        </p>
+        <p className="mt-3 text-sm font-medium text-teal-200">
+          Open Gold Petal pilot →
+        </p>
+      </Link>
       <CommodityValidationPanel />
       <section className="scanner-card">
         <div className="flex flex-wrap items-center justify-between gap-4">

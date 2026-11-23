@@ -28,6 +28,9 @@ export default function CommodityValidationPanel() {
             This plan does not fit standard commodity lots
           </h2>
           <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-300">
+            This dated review covers standard crude, copper and gold under the
+            initial ₹10,000 plan. Gold Petal has a separate paper pilot with its
+            own limits.{' '}
             Buy alerts are blocked. The calculation below fails the daily budget
             before a trading strategy can qualify. No commodity strategy has
             passed performance validation.

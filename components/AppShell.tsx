@@ -22,7 +22,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
   return (
     <AlertProvider>
       <AppProvider
-        autoRefresh={pathname !== '/market' && pathname !== '/commodities'}
+        autoRefresh={
+          pathname !== '/market' && !pathname.startsWith('/commodities')
+        }
       >
         <AlertToasts />
         <a href="#workspace-content" className="desk-skip-link">
@@ -37,7 +39,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
                 Private paper-trading workspace
               </p>
             </div>
-            {pathname === '/commodities' ? (
+            {pathname.startsWith('/commodities') ? (
               <span className="text-xs text-teal-200">
                 MCX · quotes on request
               </span>
