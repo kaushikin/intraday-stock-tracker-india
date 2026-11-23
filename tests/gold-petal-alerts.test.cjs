@@ -210,11 +210,10 @@ test('closed-page scheduler uses its own secret, fixed destination, zero retries
 });
 test('failed QStash token check does not create a schedule, arm a watch, fetch prices or expose provider text', async () => {
   const secret = 'private-token-' + 'x'.repeat(30);
-  const r = runtime(async () => ({
-    ok: false,
-    status: 401,
-    json: async () => ({ error: secret }),
-  }));
+  const r = runtime(
+    async () =>
+      new Response(JSON.stringify({ error: secret }), { status: 401 }),
+  );
   await assert.rejects(r.api.connect(secret, true), (error) => {
     assert.equal(error.code, 'authentication');
     assert.equal(error.stage, 'token-check');
@@ -241,11 +240,10 @@ test('schedule rejection is separate from token rejection; retries reuse the sam
     options.method === 'GET'
       ? { ok: true, status: 200, json: async () => [] }
       : fail
-        ? {
-            ok: false,
-            status: 400,
-            json: async () => ({ error: 'schedule limit exceeded ' + secret }),
-          }
+        ? new Response(
+            JSON.stringify({ error: 'schedule limit exceeded ' + secret }),
+            { status: 400 },
+          )
         : {
             ok: true,
             status: 200,
@@ -307,7 +305,7 @@ test('setup API exposes only the classified failure and safe status fields', asy
   const body = await result.json();
   assert.equal(body.setup.code, 'permission');
   assert.equal(body.setup.httpStatus, 403);
-  assert.match(body.error, /regular QSTASH_TOKEN/);
+  assert.match(body.error, /Keep the Free plan/);
   assert.ok(!JSON.stringify(body).includes('private-value'));
 });
 test('test confirmation is required; a server tick without a page sends once per completed candle and never creates a trade', async () => {

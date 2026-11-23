@@ -51,11 +51,7 @@ test('QStash failures retain only safe categories and the HTTP status, never arb
   ]) {
     await assert.rejects(
       qstashRequest(
-        async () => ({
-          ok: false,
-          status,
-          json: async () => ({ error: body }),
-        }),
+        async () => new Response(JSON.stringify({ error: body }), { status }),
         '/v2/schedules/destination',
         {},
         'schedule',
@@ -95,4 +91,74 @@ test('QStash failures retain only safe categories and the HTTP status, never arb
     ),
     { code: 'response', stage: 'token-check', httpStatus: 200 },
   );
+});
+test('provider details distinguish write restrictions, account activation and destination refusals without private data', async () => {
+  const token = 'a-valid-but-private-token-value';
+  const callback = 'private-callback-secret-for-this-test';
+  for (const [body, expected] of [
+    [
+      JSON.stringify({ message: 'Read-only token cannot create schedules' }),
+      /read-only token cannot create schedules/,
+    ],
+    [
+      JSON.stringify({
+        error: { message: 'Account is disabled until verification' },
+      }),
+      /account is disabled until verification/,
+    ],
+    [
+      'Custom schedule id is not allowed for this plan',
+      /custom schedule id is not allowed for this plan/,
+    ],
+    [
+      JSON.stringify({
+        detail:
+          'Destination is blocked: https://private.example/path?secret=' +
+          token,
+      }),
+      /destination is blocked/,
+    ],
+    [
+      JSON.stringify({
+        reason:
+          'Permission denied for user person@example.com token ' +
+          token +
+          ' header ' +
+          callback,
+      }),
+      /permission denied/,
+    ],
+    [
+      '<html><body>Forbidden ' + token + '</body></html>',
+      /Non-JSON access error/,
+    ],
+  ]) {
+    await assert.rejects(
+      qstashRequest(
+        async () => new Response(body, { status: 403 }),
+        '/v2/schedules/destination',
+        {
+          headers: {
+            Authorization: 'Bearer ' + token,
+            'Upstash-Forward-Authorization': 'Bearer ' + callback,
+          },
+        },
+        'schedule',
+      ),
+      (error) => {
+        assert.equal(error.code, 'permission');
+        assert.match(error.providerDetail, expected);
+        const saved = JSON.stringify(error.diagnostic('now'));
+        for (const privateValue of [
+          token,
+          callback,
+          'person@example.com',
+          'private.example',
+          '<html>',
+        ])
+          assert.ok(!saved.includes(privateValue), privateValue);
+        return true;
+      },
+    );
+  }
 });
