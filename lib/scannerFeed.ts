@@ -181,11 +181,11 @@ export async function fetchScannerData(
     ];
   };
   // Bounded, sequential requests avoid the old >20-symbol request and long serverless jobs.
-  for (let offset = 0; offset < symbols.length; offset += 4) {
+  for (let offset = 0; offset < symbols.length; offset += 2) {
     signal.throwIfAborted();
-    const shares = symbols.slice(offset, offset + 4),
+    const shares = symbols.slice(offset, offset + 2),
       // Fetch the common index once, with the final batch, closest to quote time.
-      batch = offset + 4 >= symbols.length ? [...shares, 'NIFTY'] : shares;
+      batch = offset + 2 >= symbols.length ? [...shares, 'NIFTY'] : shares;
     try {
       const result = await jsonRequest(
         '/api/market/candles',
@@ -231,7 +231,7 @@ export async function fetchScannerData(
     }
     onProgress({
       stage: 'CANDLES',
-      done: Math.min(offset + 4, symbols.length),
+      done: Math.min(offset + 2, symbols.length),
       total: symbols.length,
     });
     await runtime.pause(1100, signal);

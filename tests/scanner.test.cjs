@@ -246,9 +246,9 @@ test('all 50 shares are fetched in paced sequential batches, with quotes only af
   assert.equal(maxActive, 1);
   const candleCalls = calls.filter((c) => c.url.endsWith('/candles')),
     quoteCalls = calls.filter((c) => c.url.endsWith('/quote'));
-  assert.equal(candleCalls.length, 13);
+  assert.equal(candleCalls.length, 25);
   assert.equal(quoteCalls.length, 4);
-  assert.ok(candleCalls.every((c) => c.body.symbols.length <= 5));
+  assert.ok(candleCalls.every((c) => c.body.symbols.length <= 3));
   assert.equal(
     candleCalls.filter((c) => c.body.symbols.includes('NIFTY')).length,
     1
@@ -258,7 +258,7 @@ test('all 50 shares are fetched in paced sequential batches, with quotes only af
   assert.ok(waits.every((ms) => ms >= 1000));
   assert.equal(
     calls.findIndex((c) => c.url.endsWith('/quote')),
-    13
+    25
   );
   assert.deepEqual(
     quoteCalls.flatMap((c) => c.body.items.map((x) => x.symbol)),

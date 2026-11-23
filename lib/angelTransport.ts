@@ -161,14 +161,15 @@ export function createAngelReader(overrides: Partial<Runtime> = {}) {
                   true,
                   `Angel ${label} connection failed or timed out.`
                 );
+          const delay =
+            error.kind === 'RATE_LIMIT'
+              ? Math.max(error.retryAfterMs, 2000 * 2 ** attempt)
+              : error.retryAfterMs;
           if (error.kind === 'RATE_LIMIT')
-            current.nextAt = Math.max(
-              current.nextAt,
-              runtime.now() + error.retryAfterMs
-            );
+            current.nextAt = Math.max(current.nextAt, runtime.now() + delay);
           if (
             !retry ||
-            attempt >= 1 ||
+            attempt >= (error.kind === 'RATE_LIMIT' ? 2 : 1) ||
             !error.retryable ||
             error.retryAfterMs > 5000
           )
@@ -178,7 +179,7 @@ export function createAngelReader(overrides: Partial<Runtime> = {}) {
             kind: error.kind,
             status: error.httpStatus,
           });
-          await runtime.pause(error.retryAfterMs, signal);
+          await runtime.pause(delay, signal);
         }
       }
     });

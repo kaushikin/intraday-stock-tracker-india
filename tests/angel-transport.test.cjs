@@ -35,7 +35,7 @@ test('plain-text Angel 403 rate limits recover after a bounded pause without exp
   const result = await f.read(url, { method: 'POST' }, 'candles');
   assert.deepEqual(result.data, [['real-provider-bar']]);
   assert.equal(calls, 2);
-  assert.ok(f.waits.includes(1500));
+  assert.ok(f.waits.includes(2000));
   await assert.rejects(
     () =>
       decodeAngelResponse(
@@ -50,6 +50,7 @@ test('plain-text Angel 403 rate limits recover after a bounded pause without exp
 });
 test('persistent provider failures remain errors, access failures are not retried and Retry-After is respected', async () => {
   for (const [status, body, retries, kind, headers] of [
+    [403, 'Access denied because of exceeding access rate', 3, 'RATE_LIMIT'],
     [502, 'gateway', 2, 'UPSTREAM'],
     [200, '<html>bad format</html>', 2, 'FORMAT'],
     [403, 'Permission denied', 1, 'ACCESS'],
@@ -66,6 +67,8 @@ test('persistent provider failures remain errors, access failures are not retrie
       (e) => e.kind === kind
     );
     assert.equal(calls, retries);
+    if (status === 403 && kind === 'RATE_LIMIT')
+      assert.deepEqual(f.waits, [2000, 4000]);
   }
 });
 test('network reads retry once, cancellation stops retrying, and login is never automatically replayed', async () => {
