@@ -375,7 +375,7 @@ export function createPetalAlerts(overrides: Partial<Runtime> = {}) {
         at: rt.now().toISOString(),
         state: 'error',
         message:
-          'Background check failed. No qualifying alert was sent; the next scheduled check will retry safely.',
+          'Background check or delivery tracking failed. A notification may already be in flight. Open the app and recheck; later scheduled checks still use the shared limits.',
       });
       return { state: 'error' };
     }
