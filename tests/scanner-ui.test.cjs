@@ -177,6 +177,44 @@ test('scanner cancels a hidden-tab run and blocks duplicate starts', async (t) =
   assert.equal(calls, 1);
   assert.match(el.textContent, /Shortlist · 0/);
 });
+test('scanner explains a cross-tab wait and cancellation preserves both journals without a feed request', async (t) => {
+  const descriptor = Object.getOwnPropertyDescriptor(navigator, 'locks');
+  const locks = require('./lock-fixture.cjs').lockFixture();
+  Object.defineProperty(navigator, 'locks', {
+    value: locks,
+    configurable: true,
+  });
+  t.after(() =>
+    descriptor
+      ? Object.defineProperty(navigator, 'locks', descriptor)
+      : delete navigator.locks
+  );
+  const el = await mount(t);
+  const before = JSON.stringify({ ...localStorage });
+  let finish,
+    requests = 0;
+  const held = locks.request(
+    require('../lib/candleFeedLock.ts').CANDLE_FEED_LOCK,
+    () => new Promise((resolve) => (finish = resolve))
+  );
+  await act(async () => new Promise((resolve) => setImmediate(resolve)));
+  feeds.fetchScannerData = async () => {
+    requests++;
+    return sample();
+  };
+  await act(async () => button(el, 'Scan Nifty 50').click());
+  assert.match(el.textContent, /Waiting for another tracker tab/);
+  assert.equal(requests, 0);
+  await act(async () => button(el, 'Cancel scan').click());
+  assert.match(el.textContent, /cancelled or paused/);
+  await act(async () => {
+    finish();
+    await held;
+    await new Promise((resolve) => setImmediate(resolve));
+  });
+  assert.equal(requests, 0);
+  assert.equal(JSON.stringify({ ...localStorage }), before);
+});
 test('off-hours feed checks never produce a tradable shortlist', async (t) => {
   currentTime = new OriginalDate('2026-11-21T10:00:00+05:30').getTime();
   const el = await mount(t);

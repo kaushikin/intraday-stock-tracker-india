@@ -28,6 +28,7 @@ import ScannerMondayChecklist from '@/components/ScannerMondayChecklist';
 import type { NiftyUniverse } from '@/lib/nifty50';
 import { CHARGE_SCHEDULE } from '@/lib/brokerCharges';
 import { displayTime } from '@/components/DataStatusPanel';
+import { runScannerFeed } from '@/lib/candleFeedLock';
 const card = 'rounded-2xl border border-slate-700 bg-slate-900/60 p-4';
 const input =
   'mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white';
@@ -54,6 +55,7 @@ export default function MarketPage() {
   );
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null),
     [busy, setBusy] = useState(false),
+    [waitingForFeed, setWaitingForFeed] = useState(false),
     [error, setError] = useState(''),
     [progress, setProgress] = useState<ScanProgress | null>(null),
     [now, setNow] = useState<Date | null>(null),
@@ -112,8 +114,12 @@ export default function MarketPage() {
         const symbols = symbol
           ? [symbol]
           : universe.members.map((m) => m.symbol);
-        const result = await fetchScannerData(symbols, abort.signal, (p) => {
-          if (mounted.current) setProgress(p);
+        setWaitingForFeed(true);
+        const result = await runScannerFeed(abort.signal, () => {
+          if (mounted.current) setWaitingForFeed(false);
+          return fetchScannerData(symbols, abort.signal, (p) => {
+            if (mounted.current) setProgress(p);
+          });
         });
         abort.signal.throwIfAborted();
         // A one-share recheck retains other snapshots; freshness is still evaluated for each row.
@@ -185,7 +191,10 @@ export default function MarketPage() {
         }
       } finally {
         if (controller.current === abort) controller.current = null;
-        if (mounted.current) setBusy(false);
+        if (mounted.current) {
+          setBusy(false);
+          setWaitingForFeed(false);
+        }
       }
     },
     [config, snapshot]
@@ -495,6 +504,12 @@ export default function MarketPage() {
           Repeat full scan five minutes after completion while visible in the
           entry window
         </label>
+        {waitingForFeed && (
+          <p className="mt-3 text-sm text-amber-200" role="status">
+            Waiting for another tracker tab to finish its candle check. Keep
+            this tab visible, or use Cancel scan.
+          </p>
+        )}
         {progress && (
           <p role="status" className="mt-3 text-sm">
             {progress.stage === 'CANDLES' ? 'Candle history' : 'Fresh quotes'}:{' '}

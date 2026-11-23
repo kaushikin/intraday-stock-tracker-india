@@ -21,7 +21,8 @@ for (const key of [
   });
 global.IS_REACT_ACT_ENVIRONMENT = true;
 Object.defineProperty(navigator, 'locks', {
-  value: { request: async (_key, fn) => fn() },
+  value: { request: async (_key, options, fn) => (fn || options)({}) },
+  configurable: true,
 });
 const React = require('react'),
   { createRoot } = require('react-dom/client'),
@@ -83,6 +84,12 @@ async function change(container, label, value) {
 
 test('scanner can pause background market polling without changing either saved study or journal', async (t) => {
   const previousFetch = global.fetch;
+  const previousLocks = navigator.locks;
+  const locks = require('./lock-fixture.cjs').lockFixture();
+  Object.defineProperty(navigator, 'locks', {
+    value: locks,
+    configurable: true,
+  });
   const hidden = Object.getOwnPropertyDescriptor(document, 'hidden');
   Object.defineProperty(document, 'hidden', {
     value: false,
@@ -99,6 +106,10 @@ test('scanner can pause background market polling without changing either saved 
   };
   t.after(() => {
     global.fetch = previousFetch;
+    Object.defineProperty(navigator, 'locks', {
+      value: previousLocks,
+      configurable: true,
+    });
     if (hidden) Object.defineProperty(document, 'hidden', hidden);
     else delete document.hidden;
   });
@@ -118,6 +129,12 @@ test('scanner can pause background market polling without changing either saved 
     t
   );
   assert.equal(requests, 0);
+  let releaseScanner;
+  const scanning = locks.request(
+    require('../lib/candleFeedLock.ts').CANDLE_FEED_LOCK,
+    () => new Promise((resolve) => (releaseScanner = resolve))
+  );
+  await new Promise((resolve) => setImmediate(resolve));
   await act(async () =>
     root.render(
       React.createElement(
@@ -127,7 +144,20 @@ test('scanner can pause background market polling without changing either saved 
       )
     )
   );
-  assert.equal(requests, 2);
+  assert.equal(
+    requests,
+    1,
+    'Quotes continue, but an active scan blocks background candles'
+  );
+  releaseScanner();
+  await scanning;
+  await new Promise((resolve) => setImmediate(resolve));
+  await act(async () => window.dispatchEvent(new Event('focus')));
+  assert.equal(
+    requests,
+    3,
+    'Normal quote and candle polling resumes after the scan'
+  );
   await act(async () =>
     root.render(
       React.createElement(

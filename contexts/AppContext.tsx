@@ -23,6 +23,7 @@ import {
   type FeedRequestState,
 } from '@/lib/feedStatus';
 import { PAPER_BOOK_KEY, parsePaperBook } from '@/lib/paperBook';
+import { tryBackgroundCandleFeed } from '@/lib/candleFeedLock';
 
 export interface PriceData {
   price: number;
@@ -365,7 +366,7 @@ export function AppProvider({
     }
   }, [watchlist, studySymbols]);
 
-  const updateCandles = useCallback(async () => {
+  const fetchCandles = useCallback(async () => {
     if ((!watchlist.length && !studySymbols.length) || candleBusy.current)
       return;
 
@@ -462,6 +463,11 @@ export function AppProvider({
       candleBusy.current = false;
     }
   }, [watchlist, studySymbols]);
+
+  const updateCandles = useCallback(
+    () => tryBackgroundCandleFeed(fetchCandles),
+    [fetchCandles]
+  );
 
   useEffect(() => {
     if (!hydrated || !autoRefresh) return;
