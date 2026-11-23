@@ -1,27 +1,19 @@
-// Only market-data reads use automatic retries. Never use this for broker orders.
-type FailureKind =
-  | 'RATE_LIMIT'
-  | 'AUTH'
-  | 'ACCESS'
-  | 'UPSTREAM'
-  | 'FORMAT'
-  | 'NETWORK'
-  | 'REJECTED';
-export class AngelRequestError extends Error {
-  constructor(
-    public kind: FailureKind,
-    public httpStatus: number,
-    public retryable: boolean,
-    message: string,
-    public retryAfterMs = 1500
-  ) {
-    super(message);
-  }
-}
+// Only these market reads and session login may use this transport; never orders.
+import { AngelRequestError } from './angelErrors';
+import { angelBudget } from './angelRateLimit';
+export { AngelRequestError } from './angelErrors';
+const LOGIN =
+  'https://apiconnect.angelone.in/rest/auth/angelbroking/user/v1/loginByPassword';
+const ALLOWED = new Set([
+  LOGIN,
+  'https://apiconnect.angelone.in/rest/secure/angelbroking/market/v1/quote/',
+  'https://apiconnect.angelone.in/rest/secure/angelbroking/historical/v1/getCandleData',
+]);
 type Runtime = {
   fetcher: typeof fetch;
   pause: (ms: number, signal?: AbortSignal) => Promise<void>;
-  now: () => number;
+  acquire: (signal?: AbortSignal) => Promise<void>;
+  defer: (ms: number, signal?: AbortSignal) => Promise<void>;
 };
 export function angelPause(ms: number, signal?: AbortSignal) {
   return new Promise<void>((resolve, reject) => {
@@ -40,7 +32,8 @@ export function angelPause(ms: number, signal?: AbortSignal) {
 const defaults: Runtime = {
   fetcher: (...args) => fetch(...args),
   pause: angelPause,
-  now: () => Date.now(),
+  acquire: (signal) => angelBudget.acquire(signal),
+  defer: (ms, signal) => angelBudget.defer(ms, signal),
 };
 export async function decodeAngelResponse(response: Response, label: string) {
   const raw = await response.text();
@@ -64,13 +57,13 @@ export async function decodeAngelResponse(response: Response, label: string) {
         ? Number(retry) * 1000
         : retry
           ? Math.max(0, Date.parse(retry) - Date.now())
-          : 1500;
+          : 0;
     throw new AngelRequestError(
       'RATE_LIMIT',
       status,
       true,
       `Angel ${label} rate limit; wait before rechecking${suffix}`,
-      Number.isFinite(delay) ? Math.max(1500, delay) : 1500
+      Number.isSafeInteger(Math.ceil(delay)) ? Math.max(0, Math.ceil(delay)) : 0
     );
   }
   if (
@@ -117,36 +110,37 @@ export async function decodeAngelResponse(response: Response, label: string) {
   return data;
 }
 
-// Per-instance serialization prevents overlapping route requests from creating bursts.
-// It is not a distributed/account-wide rate limiter; other devices still share broker limits.
+// A local queue avoids unnecessary contention. Every attempt also reserves the same
+// atomic account-wide budget, including login and every automatic retry.
 export function createAngelReader(overrides: Partial<Runtime> = {}) {
   const runtime = { ...defaults, ...overrides };
-  const lanes = new Map<string, { tail: Promise<void>; nextAt: number }>();
+  let tail: Promise<void> = Promise.resolve();
   return async function read(
     url: string,
     init: RequestInit,
     label: string,
     retry = true
   ): Promise<any> {
+    if (!ALLOWED.has(url))
+      throw new AngelRequestError(
+        'REJECTED',
+        400,
+        false,
+        'Unsupported Angel endpoint. Only approved data reads and login are allowed.'
+      );
     const signal = init.signal || undefined;
-    let lane = lanes.get(url);
-    if (!lane) {
-      lane = { tail: Promise.resolve(), nextAt: 0 };
-      lanes.set(url, lane);
-    }
-    const current = lane;
-    const task = current.tail.then(async () => {
+    const task = tail.then(async () => {
       for (let attempt = 0; ; attempt++) {
         signal?.throwIfAborted();
-        const wait = current.nextAt - runtime.now();
-        if (wait > 0) await runtime.pause(wait, signal);
+        // Tracking errors are never converted into retryable broker/network errors.
+        await runtime.acquire(signal);
         signal?.throwIfAborted();
-        current.nextAt = runtime.now() + 1100;
         try {
           const timeout = AbortSignal.timeout(7000);
           const response = await runtime.fetcher(url, {
             ...init,
             cache: 'no-store',
+            redirect: 'error',
             signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
           });
           return await decodeAngelResponse(response, label);
@@ -161,14 +155,12 @@ export function createAngelReader(overrides: Partial<Runtime> = {}) {
                   true,
                   `Angel ${label} connection failed or timed out.`
                 );
-          const delay =
-            error.kind === 'RATE_LIMIT'
-              ? Math.max(error.retryAfterMs, 2000 * 2 ** attempt)
-              : error.retryAfterMs;
-          if (error.kind === 'RATE_LIMIT')
-            current.nextAt = Math.max(current.nextAt, runtime.now() + delay);
+          // Share explicit provider waits even when this caller has no retries left.
+          if (error.kind === 'RATE_LIMIT' && error.retryAfterMs > 0)
+            await runtime.defer(error.retryAfterMs, signal);
           if (
             !retry ||
+            url === LOGIN ||
             attempt >= (error.kind === 'RATE_LIMIT' ? 2 : 1) ||
             !error.retryable ||
             error.retryAfterMs > 5000
@@ -179,11 +171,12 @@ export function createAngelReader(overrides: Partial<Runtime> = {}) {
             kind: error.kind,
             status: error.httpStatus,
           });
-          await runtime.pause(delay, signal);
+          // Rate-limit retries use the next shared slot, with no separate cooldown.
+          if (error.kind !== 'RATE_LIMIT') await runtime.pause(1500, signal);
         }
       }
     });
-    current.tail = task.then(
+    tail = task.then(
       () => {},
       () => {}
     );

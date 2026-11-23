@@ -106,7 +106,8 @@ async function loginAngel(): Promise<AngelSessionCache> {
   return session;
 }
 export async function getAngelMarketData(
-  exchangeTokens: Record<string, string[]>
+  exchangeTokens: Record<string, string[]>,
+  signal?: AbortSignal
 ) {
   const session = await getAngelSession();
 
@@ -120,7 +121,9 @@ export async function getAngelMarketData(
         exchangeTokens,
       }),
       cache: 'no-store',
-      signal: AbortSignal.timeout(10_000),
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(30_000)])
+        : AbortSignal.timeout(30_000),
     },
     'quotes'
   );

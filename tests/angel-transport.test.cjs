@@ -10,11 +10,22 @@ const url =
 function fixture(fetcher) {
   let time = 0;
   const waits = [];
+  let nextAt = 0;
   return {
     waits,
     read: createAngelReader({
       fetcher,
-      now: () => time,
+      acquire: async (signal) => {
+        signal?.throwIfAborted();
+        if (time < nextAt) {
+          waits.push(nextAt - time);
+          time = nextAt;
+        }
+        nextAt = time + 2000;
+      },
+      defer: async (ms) => {
+        nextAt = Math.max(nextAt, time + ms);
+      },
       pause: async (ms, signal) => {
         signal?.throwIfAborted();
         waits.push(ms);
@@ -68,7 +79,7 @@ test('persistent provider failures remain errors, access failures are not retrie
     );
     assert.equal(calls, retries);
     if (status === 403 && kind === 'RATE_LIMIT')
-      assert.deepEqual(f.waits, [2000, 4000]);
+      assert.deepEqual(f.waits, [2000, 2000]);
   }
 });
 test('network reads retry once, cancellation stops retrying, and login is never automatically replayed', async () => {
@@ -87,7 +98,12 @@ test('network reads retry once, cancellation stops retrying, and login is never 
   );
   assert.equal(calls, 2);
   await assert.rejects(() =>
-    f.read('https://apiconnect.angelone.in/login', {}, 'login', false)
+    f.read(
+      'https://apiconnect.angelone.in/rest/auth/angelbroking/user/v1/loginByPassword',
+      {},
+      'login',
+      false
+    )
   );
   assert.equal(calls, 3);
 });
@@ -107,7 +123,7 @@ test('concurrent read calls are serialized and paced even when they enter from d
     f.read(url, {}, 'candles'),
   ]);
   assert.equal(maximum, 1);
-  assert.deepEqual(f.waits, [1100, 1100]);
+  assert.deepEqual(f.waits, [2000, 2000]);
 });
 test('simultaneous cold-session requests share a single login', async (t) => {
   const transport = require('../lib/angelTransport.ts');
@@ -152,7 +168,7 @@ test('a queued request cancels immediately without waiting for or starting anoth
     return Response.json({ status: true, data: [] });
   });
   const first = f.read(url, {}, 'candles');
-  await Promise.resolve();
+  await new Promise(setImmediate);
   const abort = new AbortController();
   const second = f.read(url, { signal: abort.signal }, 'candles');
   abort.abort();
@@ -162,4 +178,88 @@ test('a queued request cancels immediately without waiting for or starting anoth
   await first;
   await Promise.resolve();
   assert.equal(calls, 1);
+});
+
+test('shared tracking failure sends no broker call and orders are rejected before reserving', async () => {
+  const { AngelRequestError } = require('../lib/angelTransport.ts');
+  let sends = 0,
+    reservations = 0;
+  const read = createAngelReader({
+    fetcher: async () => {
+      sends++;
+    },
+    acquire: async () => {
+      reservations++;
+      throw new AngelRequestError(
+        'TRACKING_UNAVAILABLE',
+        503,
+        false,
+        'Tracking unavailable'
+      );
+    },
+  });
+  await assert.rejects(
+    () => read(url, {}, 'candles'),
+    (e) => e.kind === 'TRACKING_UNAVAILABLE'
+  );
+  assert.equal(sends, 0);
+  assert.equal(reservations, 1);
+  await assert.rejects(
+    () =>
+      read(
+        'https://apiconnect.angelone.in/rest/secure/angelbroking/order/v1/placeOrder',
+        {},
+        'order'
+      ),
+    /Unsupported/
+  );
+  assert.equal(reservations, 1);
+});
+test('every attempt reserves globally, and the final Retry-After is shared even for login', async () => {
+  let reservations = 0,
+    calls = 0;
+  const holds = [];
+  const read = createAngelReader({
+    acquire: async () => {
+      reservations++;
+    },
+    defer: async (ms) => holds.push(ms),
+    fetcher: async () => {
+      calls++;
+      return new Response('rate limit', {
+        status: 429,
+        headers: { 'Retry-After': '0.5' },
+      });
+    },
+  });
+  await assert.rejects(
+    () => read(url, {}, 'candles'),
+    (e) => e.kind === 'RATE_LIMIT'
+  );
+  assert.equal(calls, 3);
+  assert.equal(reservations, 3);
+  assert.deepEqual(holds, [500, 500, 500]);
+  await assert.rejects(() =>
+    read(
+      'https://apiconnect.angelone.in/rest/auth/angelbroking/user/v1/loginByPassword',
+      {},
+      'login'
+    )
+  );
+  assert.equal(calls, 4);
+  assert.equal(reservations, 4);
+  assert.equal(holds.length, 4);
+});
+test('abort after shared reservation does not send a broker request', async () => {
+  const abort = new AbortController();
+  let sends = 0;
+  const read = createAngelReader({
+    acquire: async () => abort.abort(),
+    fetcher: async () => sends++,
+  });
+  await assert.rejects(
+    () => read(url, { signal: abort.signal }, 'candles'),
+    /abort/i
+  );
+  assert.equal(sends, 0);
 });

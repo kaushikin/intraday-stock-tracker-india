@@ -94,3 +94,7 @@ Tests use Node's built-in runner and the installed TypeScript compiler. Browser 
 The calendar covers regular NSE sessions in **2026** using circulars CMTR/71775 and CMTR/72260. Special sessions are excluded. Entries fail closed in unverified years; verify and update before 2027. Corporate-action adjustments, actual broker latency, complete opportunity capture and transaction costs need validation against the broker terminal. See the research protocol for release checks.
 
 No application can guarantee 70% winners. Evaluate net expectancy, loss size, costs and drawdown together; a high win rate can still lose money.
+
+### Shared Angel request limits
+
+Angel login, quotes and candles now share rolling limits of **2/second, 40/minute and 2,000/hour**, with at least two seconds between requests. A connected Upstash Redis database is required; tracking failures stop requests safely. The scanner shows shared counters and retry timing. A first connection or lost ledger has a one-time 61-minute safety wait; normal restarts retain the ledger. See [setup, retries and verification](docs/angel-shared-limits.md). This does not change either journal, the three-stock study or the 3R strategy.

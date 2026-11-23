@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { AngelRequestError } from '@/lib/angelTransport';
 import { getAngelMarketData } from '@/lib/angel';
 import { exchangeTimestamp } from '@/lib/marketDataQuality';
 import { getCashInstruments } from '@/lib/cashInstruments';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 type Exchange = 'NSE' | 'BSE' | 'MCX';
 
@@ -130,6 +132,9 @@ function buildUnfetchedErrors(angelResponse: any, items: QuoteRequestItem[]) {
 }
 
 export async function POST(req: NextRequest) {
+  const deadline = req.signal
+    ? AbortSignal.any([req.signal, AbortSignal.timeout(45_000)])
+    : AbortSignal.timeout(45_000);
   try {
     const body = await req.json();
 
@@ -182,7 +187,10 @@ export async function POST(req: NextRequest) {
             [exchange]: chunk.map((item) => item.token),
           };
 
-          const angelResponse = await getAngelMarketData(exchangeTokens);
+          const angelResponse = await getAngelMarketData(
+            exchangeTokens,
+            deadline
+          );
 
           const quotes = buildQuotesFromAngelResponse(angelResponse, chunk);
           const unfetchedErrors = buildUnfetchedErrors(angelResponse, chunk);
@@ -200,7 +208,7 @@ export async function POST(req: NextRequest) {
             `Quote fetch failed for ${exchange} chunk ${chunkIndex + 1}/${
               chunks.length
             }:`,
-            error
+            error instanceof AngelRequestError ? error.kind : 'unavailable'
           );
 
           errors.push({
@@ -209,6 +217,9 @@ export async function POST(req: NextRequest) {
             symbols: chunk.map((item) => item.symbol),
             tokens: chunk.map((item) => item.token),
             error: error?.message || 'Failed to fetch quote chunk',
+            retryAfterMs:
+              error instanceof AngelRequestError ? error.retryAfterMs : 0,
+            kind: error instanceof AngelRequestError ? error.kind : 'UNKNOWN',
           });
         }
 
@@ -236,6 +247,18 @@ export async function POST(req: NextRequest) {
         },
         {
           status: 502,
+          headers: errors.some((e) => e.retryAfterMs > 0)
+            ? {
+                'Retry-After': String(
+                  Math.max(
+                    1,
+                    Math.ceil(
+                      Math.max(...errors.map((e) => e.retryAfterMs || 0)) / 1000
+                    )
+                  )
+                ),
+              }
+            : undefined,
         }
       );
     }

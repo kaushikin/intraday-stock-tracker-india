@@ -25,6 +25,7 @@ import {
 } from '@/lib/scannerFeed';
 import ScannerJournal from '@/components/ScannerJournal';
 import ScannerMondayChecklist from '@/components/ScannerMondayChecklist';
+import AngelBudgetPanel from '@/components/AngelBudgetPanel';
 import UpstoxComparisonPanel from '@/components/UpstoxComparisonPanel';
 import type { NiftyUniverse } from '@/lib/nifty50';
 import { CHARGE_SCHEDULE } from '@/lib/brokerCharges';
@@ -404,6 +405,7 @@ export default function MarketPage() {
       </nav>
       <section id="scanner-run" className={card}>
         <h2 className="text-lg font-semibold">Run a scan</h2>
+        <AngelBudgetPanel scanBusy={busy} />
         {config.error && (
           <p role="alert" className="mt-2 text-sm text-amber-200">
             Review budget settings: {config.error}

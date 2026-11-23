@@ -167,7 +167,9 @@ function normalizeAngelCandles(rawCandles: any[]): Candle[] {
 
 export async function POST(req: NextRequest) {
   // Leave time to return explicit failures before the client/serverless deadlines.
-  const deadline = AbortSignal.timeout(45_000);
+  const deadline = req.signal
+    ? AbortSignal.any([req.signal, AbortSignal.timeout(45_000)])
+    : AbortSignal.timeout(45_000);
   try {
     const body = await req.json();
 
@@ -284,6 +286,7 @@ export async function POST(req: NextRequest) {
           ...(error instanceof AngelRequestError
             ? {
                 providerStatus: error.httpStatus,
+                retryAfterMs: error.retryAfterMs,
                 code: error.kind,
                 retryable: error.retryable,
               }
