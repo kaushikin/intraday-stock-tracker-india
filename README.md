@@ -98,3 +98,9 @@ No application can guarantee 70% winners. Evaluate net expectancy, loss size, co
 ### Shared Angel request limits
 
 Angel login, quotes and candles now share rolling limits of **2/second, 40/minute and 2,000/hour**, with at least two seconds between requests. A connected Upstash Redis database is required; tracking failures stop requests safely. The scanner shows shared counters and retry timing. A first connection or lost ledger has a one-time 61-minute safety wait; normal restarts retain the ledger. See [setup, retries and verification](docs/angel-shared-limits.md). This does not change either journal, the three-stock study or the 3R strategy.
+
+### Commodity watch (data only)
+
+**Commodities** under Tools (or More on mobile) opens a separate manual price panel for standard MCX crude oil, copper and gold futures. It resolves the nearest listed expiry strictly after today from Angel's current instrument master; expired tokens, options and mini variants are excluded. Each refresh requests all three contracts in one quote batch through the same shared Angel limiter. Exchange feed, last-trade and receipt timestamps are shown, and snapshots become stale after 30 seconds. No background price polling, signals, orders, journals, ₹50 qualification or lot/margin calculations are added. Match the exact contract and expiry in Angel One before trusting a price. MCX trading hours differ from NSE; this panel does not infer an open session from the stock market clock.
+
+Provider references: [Angel SmartAPI](https://smartapi.angelone.in/docs/ResponseStructure) and [current instrument master](https://margincalculator.angelone.in/OpenAPI_File/files/OpenAPIScripMaster.json). Product references are linked on each card. Quotes are exchange-quoted unit prices, not one-lot cost or margin.

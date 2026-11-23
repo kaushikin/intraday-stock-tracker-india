@@ -47,8 +47,9 @@ test('mobile tools remain reachable and close on Escape and navigation, with act
   );
   await act(async () => more.click());
   assert.equal(more.getAttribute('aria-expanded'), 'true');
-  assert.equal(el.querySelectorAll('#mobile-more-tools a').length, 5);
+  assert.equal(el.querySelectorAll('#mobile-more-tools a').length, 6);
   assert.ok(el.querySelector('#mobile-more-tools a[href="/settings"]'));
+  assert.ok(el.querySelector('#mobile-more-tools a[href="/commodities"]'));
   await act(async () =>
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
   );

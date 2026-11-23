@@ -21,7 +21,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
   }
   return (
     <AlertProvider>
-      <AppProvider autoRefresh={pathname !== '/market'}>
+      <AppProvider
+        autoRefresh={pathname !== '/market' && pathname !== '/commodities'}
+      >
         <AlertToasts />
         <a href="#workspace-content" className="desk-skip-link">
           Skip to content
@@ -35,7 +37,13 @@ export default function AppShell({ children }: { children: ReactNode }) {
                 Private paper-trading workspace
               </p>
             </div>
-            <MarketStatus />
+            {pathname === '/commodities' ? (
+              <span className="text-xs text-teal-200">
+                MCX · quotes on request
+              </span>
+            ) : (
+              <MarketStatus />
+            )}
           </header>
           <main
             id="workspace-content"

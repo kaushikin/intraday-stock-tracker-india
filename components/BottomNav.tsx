@@ -25,6 +25,7 @@ const main = [
   { href: '/trades', label: 'Trades', icon: BookOpen },
 ];
 const tools = [
+  { href: '/commodities', label: 'Commodities', icon: Globe2 },
   { href: '/watchlist', label: 'Watchlist', icon: Eye },
   { href: '/calculator', label: 'Calculator', icon: Calculator },
   { href: '/analytics', label: 'Analytics', icon: PieChart },
