@@ -33,6 +33,12 @@ type Status = {
     notBefore: string;
     expiresAt: string;
   };
+  notificationTest?: {
+    id: string;
+    mode: 'immediate' | 'closed-page';
+    state: string;
+    message: string;
+  };
 };
 const time = (s: string) =>
   new Date(s).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) + ' IST';
@@ -48,6 +54,7 @@ export default function GoldPetalBackgroundAlerts({
     [token, setToken] = useState(''),
     [free, setFree] = useState(false),
     [acknowledged, setAcknowledged] = useState(false),
+    [receivedTestId, setReceivedTestId] = useState(''),
     [note, setNote] = useState('');
   async function load() {
     try {
@@ -116,7 +123,7 @@ export default function GoldPetalBackgroundAlerts({
       setBusy(false);
     }
   }
-  async function enable() {
+  async function allowNotifications() {
     if (
       !status ||
       !('Notification' in window) ||
@@ -132,7 +139,9 @@ export default function GoldPetalBackgroundAlerts({
       throw new Error(
         'Notifications are blocked. Allow this site in your browser settings, then try again.',
       );
-    const risk = await readAlertRisk(feeFloor);
+  }
+  async function subscribe() {
+    if (!status) throw new Error('Alert status unavailable.');
     await navigator.serviceWorker.register('/sw.js');
     const registration = await new Promise<ServiceWorkerRegistration>(
       (resolve, reject) => {
@@ -167,6 +176,12 @@ export default function GoldPetalBackgroundAlerts({
         userVisibleOnly: true,
         applicationServerKey: key,
       }));
+    return subscription;
+  }
+  async function enable() {
+    await allowNotifications();
+    const risk = await readAlertRisk(feeFloor);
+    const subscription = await subscribe();
     const armed = await alertAction({
       action: 'arm',
       risk,
@@ -194,7 +209,19 @@ export default function GoldPetalBackgroundAlerts({
       'A test notification was sent. Confirm below only if you received it. Background candidates stay paused until then.',
     );
   }
+  async function testOnly(mode: 'immediate' | 'closed-page') {
+    await allowNotifications();
+    const subscription = await subscribe();
+    const result = await alertAction({
+      action: 'notification-test',
+      mode,
+      subscription: subscription.toJSON(),
+    });
+    setReceivedTestId('');
+    setNote(result.message);
+  }
   const watch = status?.watch;
+  const notificationTest = status?.notificationTest;
   const heartbeatLate =
     watch?.confirmed &&
     (!status?.heartbeat ||
@@ -285,6 +312,68 @@ export default function GoldPetalBackgroundAlerts({
         </p>
       )}
       <GoldPetalNotificationChecklist />
+      <section
+        id="gold-petal-test-only"
+        aria-label="Test notifications only"
+        className="scroll-mt-6 rounded-xl border border-teal-800 bg-teal-950/20 p-4 space-y-3"
+      >
+        <h3 className="font-semibold text-teal-100">Test notifications only</h3>
+        <p className="text-sm text-slate-300">
+          Practise delivery with trading alerts off, even when today’s loss
+          limit is reached. This does not change risk, qualify a trade or write
+          to any journal. No extra scheduler or paid plan is added.
+        </p>
+        {watch && (
+          <p className="text-sm text-amber-200">
+            Stop background alerts before using this separate test.
+          </p>
+        )}
+        <div className="flex flex-wrap gap-2">
+          <button
+            className="scanner-secondary"
+            disabled={
+              busy || !status || !!watch || notificationTest?.state === 'queued'
+            }
+            onClick={() => void run(() => testOnly('immediate'))}
+          >
+            Send notification-only test now
+          </button>
+          {notificationTest?.mode === 'immediate' &&
+            notificationTest.state === 'sent' &&
+            receivedTestId !== notificationTest.id && (
+              <button
+                className="scanner-secondary"
+                disabled={busy || !!watch}
+                onClick={() => setReceivedTestId(notificationTest.id)}
+              >
+                I saw the notification-only test
+              </button>
+            )}
+          {notificationTest?.mode === 'immediate' &&
+            notificationTest.state === 'sent' &&
+            receivedTestId === notificationTest.id && (
+              <button
+                className="scanner-secondary"
+                disabled={busy || !!watch || !status?.schedulerConnected}
+                onClick={() => void run(() => testOnly('closed-page'))}
+              >
+                Test only with app closed in 1–2 minutes
+              </button>
+            )}
+        </div>
+        {notificationTest && (
+          <p role="status" className="text-sm text-amber-200">
+            {notificationTest.message}
+          </p>
+        )}
+        <p className="text-xs text-slate-400">
+          After seeing the first TEST, confirm it here to unlock the closed-page
+          test. Queue that test between 6:00 PM and 9:27 PM IST on a trading
+          day. Close every trading-app tab; keep Chrome running and your Mac
+          awake. “Accepted by the push provider” is not proof that you received
+          it. Confirming this test never enables trading alerts.
+        </p>
+      </section>
       {!status?.schedulerConnected && (
         <details className="rounded-xl border border-slate-700 p-4">
           <summary className="cursor-pointer text-sm text-teal-200">

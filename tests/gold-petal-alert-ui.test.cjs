@@ -31,7 +31,10 @@ global.Date = class extends RealDate {
   }
 };
 global.IS_REACT_ACT_ENVIRONMENT = true;
-Object.defineProperty(document, 'hidden', { value: false, configurable: true });
+Object.defineProperty(document, 'hidden', {
+  value: false,
+  configurable: true,
+});
 const React = require('react'),
   { act } = React,
   { createRoot } = require('react-dom/client'),
@@ -94,6 +97,15 @@ async function mount(t, permission = 'granted', connected = true) {
     if (options?.method === 'POST') {
       const body = JSON.parse(options.body);
       actions.push(body);
+      if (body.action === 'notification-test') {
+        state.notificationTest = {
+          id: 'diagnostic-' + body.mode,
+          mode: body.mode,
+          state: body.mode === 'immediate' ? 'sent' : 'queued',
+          message: 'Notification-only test. Trading alerts remain off.',
+        };
+        return { ok: true, json: async () => state.notificationTest };
+      }
       if (body.action === 'connect') {
         state.setup = {
           at: f.now.toISOString(),
@@ -301,4 +313,50 @@ test('higher entered costs stop a running background watch instead of leaving it
   assert.ok(
     actions.some((a) => a.action === 'stop' && a.revision === 'test-revision'),
   );
+});
+
+test('notification-only flow preserves a ₹500 loss declaration and both journals, never sends risk or arms a watch', async (t) => {
+  const { el, writes, actions, state } = await mount(t);
+  const book = f.book();
+  book.declarations['2026-11-23'].amount = 500;
+  localStorage.setItem('gold_petal_paper_pilot_v1', JSON.stringify(book));
+  const before = Object.fromEntries(
+    Object.keys(localStorage).map((k) => [k, localStorage.getItem(k)]),
+  );
+  writes.length = 0;
+  await act(async () => button(el, 'Send notification-only test now').click());
+  for (
+    let i = 0;
+    i < 100 && !button(el, 'I saw the notification-only test');
+    i++
+  )
+    await act(async () => new Promise((r) => setTimeout(r, 10)));
+  assert.equal(state.watch, null);
+  assert.equal(
+    button(el, 'Test only with app closed in 1–2 minutes'),
+    undefined,
+  );
+  await act(async () => button(el, 'I saw the notification-only test').click());
+  await act(async () =>
+    button(el, 'Test only with app closed in 1–2 minutes').click(),
+  );
+  for (
+    let i = 0;
+    i < 100 && state.notificationTest?.mode !== 'closed-page';
+    i++
+  )
+    await act(async () => new Promise((r) => setTimeout(r, 10)));
+  assert.deepEqual(
+    actions.map((a) => [a.action, a.mode]),
+    [
+      ['notification-test', 'immediate'],
+      ['notification-test', 'closed-page'],
+    ],
+  );
+  assert.ok(actions.every((a) => !a.risk && !a.positions));
+  assert.deepEqual(writes, []);
+  assert.equal(state.watch, null);
+  assert.equal(localStorage.getItem(PETAL_ALERT_LOCAL_KEY), null);
+  for (const [k, v] of Object.entries(before))
+    assert.equal(localStorage.getItem(k), v, k);
 });

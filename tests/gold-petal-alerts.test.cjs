@@ -247,7 +247,9 @@ test('schedule rejection is separate from token rejection; retries reuse the sam
         : {
             ok: true,
             status: 200,
-            json: async () => ({ scheduleId: 'intraday-india-gold-petal-v1' }),
+            json: async () => ({
+              scheduleId: 'intraday-india-gold-petal-v1',
+            }),
           },
   );
   await assert.rejects(r.api.connect(secret, true), {
@@ -471,5 +473,69 @@ test('closed-page test cancels with a stopped watch and expires without blocking
         'normal market checks resume after a missed test',
       );
     }
+  }
+});
+
+test('notification-only tests work with exhausted risk without arming a watch or fetching broker data', async () => {
+  const r = runtime();
+  await assert.rejects(r.api.arm(risk({ used: 500 }), subscription, true));
+  const immediate = await r.api.notificationTest(subscription, 'immediate');
+  assert.equal(immediate.state, 'sent');
+  assert.equal(r.pushes[0].payload.kind, 'TEST');
+  assert.match(r.pushes[0].payload.body, /Trading alerts stay off/);
+  await assert.rejects(r.api.notificationTest(subscription, 'immediate'));
+  await assert.rejects(
+    r.api.notificationTest(subscription, 'closed-page'),
+    /Connect the free/,
+  );
+  await r.api.connect('x'.repeat(30), true);
+  const queued = await r.api.notificationTest(subscription, 'closed-page');
+  await assert.rejects(r.api.notificationTest(subscription, 'closed-page'));
+  assert.equal(
+    (await r.api.tick(new AbortController().signal)).state,
+    'notification-test-waiting',
+  );
+  r.advance(60000);
+  assert.equal(
+    (await r.api.tick(new AbortController().signal)).state,
+    'notification-test-sent',
+  );
+  assert.equal(r.pushes.length, 2);
+  assert.equal(r.data.has('notification-test-sub:' + queued.id), false);
+  const status = await r.api.status();
+  assert.equal(status.notificationTest.state, 'sent');
+  assert.equal(status.watch, null);
+  assert.ok(!JSON.stringify(status).includes(subscription.endpoint));
+  r.advance(60000);
+  assert.equal((await r.api.tick(new AbortController().signal)).state, 'off');
+  assert.equal(r.pushes.length, 2);
+  assert.equal(r.calls(), 0);
+  assert.equal(r.data.has('watch'), false);
+});
+
+test('notification-only tests expire, sanitize push errors and cancel when a separate watch is enabled', async () => {
+  for (const mode of ['expire', 'failure', 'watch']) {
+    const r = runtime();
+    await r.api.connect('x'.repeat(30), true);
+    const queued = await r.api.notificationTest(subscription, 'closed-page');
+    if (mode === 'expire') r.advance(181000);
+    else r.advance(60000);
+    if (mode === 'failure') r.pushError();
+    if (mode === 'watch') await r.api.arm(risk(), subscription, true);
+    await r.api.tick(new AbortController().signal);
+    const status = await r.api.status();
+    assert.equal(
+      status.notificationTest.state,
+      { expire: 'expired', failure: 'error', watch: 'cancelled' }[mode],
+    );
+    assert.ok(!JSON.stringify(status).includes('secret'));
+    assert.equal(r.data.has('notification-test-sub:' + queued.id), false);
+    assert.equal(r.calls(), 0);
+    assert.equal(r.pushes.length, mode === 'watch' ? 1 : 0);
+    if (mode === 'watch')
+      await assert.rejects(
+        r.api.notificationTest(subscription, 'immediate'),
+        /requires trading alerts to be off/,
+      );
   }
 });

@@ -34,6 +34,10 @@ export async function POST(req: NextRequest) {
     if (raw.length > 12000) return json({ error: 'Request too large.' }, 413);
     const body = JSON.parse(raw);
     switch (body?.action) {
+      case 'notification-test':
+        return json(
+          await petalAlerts.notificationTest(body.subscription, body.mode),
+        );
       case 'connect':
         await petalAlerts.connect(body.token, body.freeConfirmed);
         break;
@@ -75,7 +79,7 @@ export async function POST(req: NextRequest) {
     // Only our user-facing validation errors; never return provider bodies/tokens.
     const message =
       e instanceof Error &&
-      /^(Confirm|Select QStash|Scheduler |Connect the free|Today’s entry|Invalid browser|This browser|The alert test|The closed-page test)/.test(
+      /^(Confirm|Select QStash|Scheduler |Connect the free|Today’s entry|Invalid browser|This browser|The alert test|The closed-page test|The notification-only)/.test(
         e.message,
       )
         ? e.message

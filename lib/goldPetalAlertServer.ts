@@ -46,6 +46,9 @@ type ClosedPageTest = {
   expiresAt: string;
   message: string;
 };
+type NotificationTest = Omit<ClosedPageTest, 'revision'> & {
+  mode: 'immediate' | 'closed-page';
+};
 type Runtime = {
   redis: AlertRedis;
   key: (s: string) => string;
@@ -144,18 +147,27 @@ export function createPetalAlerts(overrides: Partial<Runtime> = {}) {
     });
   }
   async function status() {
-    const [keys, schedule, watch, last, heartbeat, closedTest, setup] =
-      await Promise.all([
-        secrets(),
-        get<{ id: string }>('schedule'),
-        get<Watch>('watch'),
-        get<{ revision: string; at: string; state: string; message: string }>(
-          'last',
-        ),
-        get<{ at: string }>('heartbeat'),
-        get<ClosedPageTest>('closed-test'),
-        get<SetupDiagnostic>('setup-last'),
-      ]);
+    const [
+      keys,
+      schedule,
+      watch,
+      last,
+      heartbeat,
+      closedTest,
+      setup,
+      notificationTest,
+    ] = await Promise.all([
+      secrets(),
+      get<{ id: string }>('schedule'),
+      get<Watch>('watch'),
+      get<{ revision: string; at: string; state: string; message: string }>(
+        'last',
+      ),
+      get<{ at: string }>('heartbeat'),
+      get<ClosedPageTest>('closed-test'),
+      get<SetupDiagnostic>('setup-last'),
+      get<NotificationTest>('notification-test'),
+    ]);
     const active =
       !!watch &&
       Date.parse(watch.expiresAt) > rt.now().getTime() &&
@@ -165,6 +177,16 @@ export function createPetalAlerts(overrides: Partial<Runtime> = {}) {
       schedulerConnected: !!schedule,
       setup,
       heartbeat,
+      notificationTest:
+        notificationTest?.state === 'queued' &&
+        Date.parse(notificationTest.expiresAt) <= rt.now().getTime()
+          ? {
+              ...notificationTest,
+              state: 'expired',
+              message:
+                'Notification-only test expired. Check the last server contact and notification settings before retrying.',
+            }
+          : notificationTest,
       watch: active
         ? {
             revision: watch!.revision,
@@ -466,11 +488,158 @@ export function createPetalAlerts(overrides: Partial<Runtime> = {}) {
       timingSafeEqual(supplied, expected)
     );
   }
+  async function notificationTest(subscriptionValue: unknown, mode: unknown) {
+    if (mode !== 'immediate' && mode !== 'closed-page')
+      throw new Error('The notification-only test mode is invalid.');
+    const now = rt.now(),
+      subscription = validSubscription(subscriptionValue);
+    const watch = await get<Watch>('watch');
+    if (watch && Date.parse(watch.expiresAt) > now.getTime())
+      throw new Error(
+        'The notification-only test requires trading alerts to be off. Stop background alerts first.',
+      );
+    const pending = await get<NotificationTest>('notification-test');
+    if (
+      pending?.state === 'queued' &&
+      Date.parse(pending.expiresAt) > now.getTime()
+    )
+      throw new Error(
+        'The notification-only test is already queued. Wait for its result before another test.',
+      );
+    if (mode === 'closed-page') {
+      if (
+        petalSessionProblem(now) ||
+        now.getTime() >= Date.parse(istDateKey(now) + 'T21:27:00+05:30')
+      )
+        throw new Error(
+          'The notification-only closed-page test is available on trading days from 18:00 until 21:27 IST.',
+        );
+      if (!(await get('schedule')))
+        throw new Error('Connect the free scheduler first.');
+    }
+    if (
+      !(await rt.redis([
+        'SET',
+        rt.key('notification-test-throttle:' + mode),
+        '1',
+        'NX',
+        'EX',
+        mode === 'immediate' ? 60 : 180,
+      ]))
+    )
+      throw new Error(
+        'The notification-only test was requested recently. Wait one minute for an immediate test or three minutes for a closed-page test.',
+      );
+    const test: NotificationTest = {
+      id: randomUUID(),
+      mode,
+      state: 'queued',
+      notBefore: new Date(
+        now.getTime() + (mode === 'closed-page' ? 45000 : 0),
+      ).toISOString(),
+      expiresAt: new Date(now.getTime() + 180000).toISOString(),
+      message:
+        'Notification-only test queued. Close every trading-app tab now; keep Chrome running and the Mac awake. Expect a TEST in 1–2 minutes. Trading alerts remain off.',
+    };
+    // Separate short-lived storage, with no risk snapshot, watch or journal writes.
+    if (mode === 'closed-page') {
+      await set('notification-test-sub:' + test.id, subscription, 180);
+      await set('notification-test', test);
+      return test;
+    }
+    const result = await sendNotificationTest(test, subscription);
+    await set('notification-test', result);
+    return result;
+  }
+  async function sendNotificationTest(
+    test: NotificationTest,
+    subscription: PushSubscription,
+  ): Promise<NotificationTest> {
+    try {
+      await send(
+        subscription,
+        {
+          title:
+            test.mode === 'immediate'
+              ? 'Gold Petal · notification-only TEST'
+              : 'Gold Petal · closed-page TEST',
+          body: 'Delivery test only. Trading alerts stay off. No market signal, paper trade or broker order was created.',
+          kind: 'TEST',
+          tag: 'diagnostic-' + test.id,
+          expiresAt: rt.now().getTime() + 60000,
+        },
+        60,
+      );
+      return {
+        ...test,
+        state: 'sent',
+        message:
+          'Notification-only test accepted by the push provider. Count it as passed only if you actually saw the notification. Trading alerts remain off.',
+      };
+    } catch {
+      return {
+        ...test,
+        state: 'error',
+        message:
+          'Notification-only delivery failed or is uncertain. Check browser and Mac notification settings. Trading alerts remain off.',
+      };
+    }
+  }
+  async function deliverNotificationTest(now: Date) {
+    const test = await get<NotificationTest>('notification-test');
+    if (!test || test.mode !== 'closed-page' || test.state !== 'queued')
+      return null;
+    if (now.getTime() < Date.parse(test.notBefore))
+      return { state: 'notification-test-waiting' };
+    if (
+      !(await rt.redis([
+        'SET',
+        rt.key('notification-test-claim:' + test.id),
+        '1',
+        'NX',
+        'EX',
+        86400,
+      ]))
+    )
+      return { state: 'notification-test-claimed' };
+    const watch = await get<Watch>('watch');
+    const subscription = await get<PushSubscription>(
+      'notification-test-sub:' + test.id,
+    );
+    let result: NotificationTest;
+    if (watch && Date.parse(watch.expiresAt) > now.getTime())
+      result = {
+        ...test,
+        state: 'cancelled',
+        message:
+          'Notification-only test cancelled because a trading watch was enabled separately.',
+      };
+    else if (now.getTime() >= Date.parse(test.expiresAt) || !subscription)
+      result = {
+        ...test,
+        state: 'expired',
+        message:
+          'Notification-only test expired before delivery. Check the last server contact and retry.',
+      };
+    else result = await sendNotificationTest(test, subscription);
+    await rt.redis(['DEL', rt.key('notification-test-sub:' + test.id)]);
+    await rt.redis([
+      'EVAL',
+      "local raw=redis.call('GET',KEYS[1]); if raw and cjson.decode(raw).id==ARGV[1] then redis.call('SET',KEYS[1],ARGV[2],'KEEPTTL'); return 1 end; return 0",
+      1,
+      rt.key('notification-test'),
+      test.id,
+      JSON.stringify(result),
+    ]);
+    return { state: 'notification-test-' + result.state };
+  }
   async function tick(signal: AbortSignal) {
     const now = rt.now();
     if (!(await rt.redis(['SET', rt.key('tick-lock'), '1', 'NX', 'EX', 55])))
       return { state: 'duplicate' };
     await set('heartbeat', { at: now.toISOString() });
+    const notificationResult = await deliverNotificationTest(now);
+    if (notificationResult) return notificationResult;
     const watch = await get<Watch>('watch');
     if (
       !watch ||
@@ -564,6 +733,7 @@ export function createPetalAlerts(overrides: Partial<Runtime> = {}) {
     stop,
     confirm,
     queueClosedTest,
+    notificationTest,
     authenticate,
     tick,
   };

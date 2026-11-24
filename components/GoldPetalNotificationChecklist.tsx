@@ -51,6 +51,16 @@ export default function GoldPetalNotificationChecklist() {
         Reading this guide does not enable alerts or confirm delivery. No test
         trades are needed in either stock journal or the Gold Petal pilot.
       </p>
+      <p className="mt-3 text-sm leading-6 text-teal-100">
+        Only testing, or already at the daily loss limit? Use{' '}
+        <a className={link} href="#gold-petal-test-only">
+          Test notifications only
+        </a>{' '}
+        below. Send the immediate test, confirm only after seeing it, then use
+        its separate closed-page test. Trading alerts stay off and your actual
+        risk declaration stays unchanged. Steps 1–4 still apply; steps 5–8 below
+        describe enabling a trading watch on an eligible day.
+      </p>
       <div className="mt-3 rounded-xl bg-slate-950/50 p-3 text-sm">
         <p className="font-medium text-teal-200">Test window · IST</p>
         <p className="mt-1 text-slate-300">
